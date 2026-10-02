@@ -111,48 +111,57 @@
                     File Management
                 </h3>
 
-                <div class="space-y-2">
-
-                    <label class="block">
-                        <span class="text-[10px] text-slate-500 uppercase block mb-1">
-                            1. Choose ROM
-                        </span>
-
+                <div class="space-y-3">
+                    <div>
+                        <div class="flex items-center justify-between text-[10px] uppercase mb-1">
+                            <span class="text-slate-500 font-bold">1. ROM File</span>
+                            <span id="rom-status" class="text-slate-400">Searching server...</span>
+                        </div>
                         <input
                             type="file"
                             id="rom-upload"
                             accept=".gbc,.gb"
                             class="text-xs w-full block text-slate-400 file:mr-4 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-slate-200 hover:file:bg-slate-600"
                         >
-                    </label>
+                        <p class="text-[9px] text-slate-500 mt-0.5">Optional override if auto-load is active</p>
+                    </div>
 
-                    <label class="block">
-                        <span class="text-[10px] text-slate-500 uppercase block mb-1">
-                            2. Choose Save (.sav)
-                        </span>
-
+                    <div>
+                        <div class="flex items-center justify-between text-[10px] uppercase mb-1">
+                            <span class="text-slate-500 font-bold">2. Save Data</span>
+                            <span id="sav-status" class="text-slate-400">Checking storage...</span>
+                        </div>
                         <input
                             type="file"
                             id="sav-upload"
                             accept=".sav"
                             class="text-xs w-full block text-slate-400 file:mr-4 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-slate-200 hover:file:bg-slate-600"
                         >
-                    </label>
+                        <p class="text-[9px] text-slate-500 mt-0.5">Auto-saves to browser. Upload to import custom .sav</p>
+                    </div>
 
                     <button
                         id="btn-start"
-                        class="w-full bg-blue-600 hover:bg-blue-500 py-2 rounded text-xs font-bold mt-2 transition-all"
+                        class="w-full bg-blue-600 hover:bg-blue-500 py-2.5 rounded text-xs font-bold transition-all shadow-lg cursor-pointer"
                     >
                         START ENGINE
                     </button>
 
-                    <button
-                        id="btn-download-sav"
-                        class="w-full bg-emerald-700 hover:bg-emerald-600 py-2 rounded text-xs font-bold disabled:opacity-30 disabled:cursor-not-allowed"
-                        disabled
-                    >
-                        DOWNLOAD CURRENT SAVE
-                    </button>
+                    <div class="grid grid-cols-2 gap-2 pt-1">
+                        <button
+                            id="btn-download-sav"
+                            class="w-full bg-emerald-700 hover:bg-emerald-600 py-1.5 rounded text-[11px] font-bold disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                            disabled
+                        >
+                            EXPORT .SAV
+                        </button>
+                        <button
+                            id="btn-clear-sav"
+                            class="w-full bg-rose-900/60 hover:bg-rose-800 text-rose-300 py-1.5 rounded text-[11px] font-bold border border-rose-700/50 cursor-pointer"
+                        >
+                            RESET SAVE
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -739,46 +748,224 @@
         }
 
         // ============================================================
-        // START ENGINE & SAVE
+        // BROWSER SAVE STORAGE (IndexedDB)
         // ============================================================
-        $('btn-start').onclick = async () => {
-            const romFile = $('rom-upload').files[0];
-            const savFile = $('sav-upload').files[0];
+        const DB_NAME = 'PokemonTCG_DB';
+        const DB_STORE = 'saves';
+        const SRAM_KEY = 'tcg_sram';
 
-            if (!romFile) {
-                log("Select ROM first.");
-                return;
+        function openSaveDB() {
+            return new Promise((resolve, reject) => {
+                const req = indexedDB.open(DB_NAME, 1);
+                req.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains(DB_STORE)) {
+                        db.createObjectStore(DB_STORE);
+                    }
+                };
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        async function loadSramFromStorage() {
+            try {
+                const db = await openSaveDB();
+                return new Promise((resolve) => {
+                    const tx = db.transaction(DB_STORE, 'readonly');
+                    const store = tx.objectStore(DB_STORE);
+                    const req = store.get(SRAM_KEY);
+                    req.onsuccess = () => resolve(req.result || null);
+                    req.onerror = () => resolve(null);
+                });
+            } catch (err) {
+                console.warn("Save storage load error:", err);
+                return null;
             }
+        }
 
-            const romBuf = await romFile.arrayBuffer();
-            const savBuf = savFile ? await savFile.arrayBuffer() : null;
+        async function saveSramToStorage(data) {
+            if (!data || data.length === 0) return;
+            try {
+                const db = await openSaveDB();
+                return new Promise((resolve) => {
+                    const tx = db.transaction(DB_STORE, 'readwrite');
+                    const store = tx.objectStore(DB_STORE);
+                    store.put(data, SRAM_KEY);
+                    tx.oncomplete = () => resolve(true);
+                    tx.onerror = () => resolve(false);
+                });
+            } catch (err) {
+                console.warn("Save storage write error:", err);
+            }
+        }
 
-            await initEmulator(romBuf, savBuf);
-            $('focus-overlay').classList.remove('hidden');
-        };
+        async function clearSramFromStorage() {
+            try {
+                const db = await openSaveDB();
+                return new Promise((resolve) => {
+                    const tx = db.transaction(DB_STORE, 'readwrite');
+                    const store = tx.objectStore(DB_STORE);
+                    store.delete(SRAM_KEY);
+                    tx.oncomplete = () => resolve(true);
+                    tx.onerror = () => resolve(false);
+                });
+            } catch (err) {
+                console.warn("Save storage clear error:", err);
+            }
+        }
 
-        $('btn-download-sav').onclick = () => {
+        function getEmulatorSramData() {
+            if (!emulatorPtr || !module) return null;
             const extRamFileNew = getExport('ext_ram_file_data_new');
             const writeExtRam = getExport('emulator_write_ext_ram');
             const getFileDataPtr = getExport('get_file_data_ptr');
             const getFileDataSize = getExport('get_file_data_size');
             const fileDataDelete = getExport('file_data_delete');
 
+            if (!extRamFileNew || !writeExtRam) return null;
             const fileDataPtr = extRamFileNew(emulatorPtr);
             writeExtRam(emulatorPtr, fileDataPtr);
 
             const ptr = getFileDataPtr(fileDataPtr);
             const size = getFileDataSize(fileDataPtr);
-
+            let copy = null;
             if (size > 0) {
-                const blob = new Blob([new Uint8Array(module.HEAP8.buffer, ptr, size)], { type: 'application/octet-stream' });
-                const a = document.createElement('a');
-                a.href = URL.createObjectURL(blob);
-                a.download = 'game.sav';
-                a.click();
+                copy = new Uint8Array(module.HEAP8.buffer, ptr, size).slice();
             }
             fileDataDelete(fileDataPtr);
+            return copy;
+        }
+
+        // Auto-save SRAM periodically every 5 seconds if running
+        setInterval(async () => {
+            if (emulatorPtr) {
+                const sram = getEmulatorSramData();
+                if (sram && sram.length > 0) {
+                    await saveSramToStorage(sram);
+                }
+            }
+        }, 5000);
+
+        // Also persist before closing/reloading window
+        window.addEventListener('beforeunload', () => {
+            if (emulatorPtr) {
+                const sram = getEmulatorSramData();
+                if (sram && sram.length > 0) {
+                    saveSramToStorage(sram);
+                }
+            }
+        });
+
+        // ============================================================
+        // ROM AUTO-FETCHING & STATUS INIT
+        // ============================================================
+        let autoFetchedRom = null;
+
+        async function autoDetectRom() {
+            const romPaths = [
+                './poketcg.gbc',
+                './poketcg.gb',
+                './pokemon_tcg.gbc',
+                './game.gbc',
+                './rom.gbc'
+            ];
+
+            for (const path of romPaths) {
+                try {
+                    const res = await fetch(path, { method: 'GET', cache: 'no-cache' });
+                    if (res.ok) {
+                        const buf = await res.arrayBuffer();
+                        if (buf && buf.byteLength >= 0x8000) {
+                            autoFetchedRom = buf;
+                            const sizeKb = Math.round(buf.byteLength / 1024);
+                            const cleanName = path.replace('./', '');
+                            $('rom-status').innerHTML = `<span class="text-emerald-400 font-bold">Auto: ${cleanName} (${sizeKb}KB)</span>`;
+                            $('btn-start').innerText = `START GAME (${cleanName})`;
+                            $('btn-start').className = "w-full bg-emerald-600 hover:bg-emerald-500 py-2.5 rounded text-xs font-bold transition-all shadow-lg cursor-pointer";
+                            log(`Auto-detected ROM on server: ${path} (${sizeKb} KB)`);
+                            return;
+                        }
+                    }
+                } catch (_) {}
+            }
+
+            $('rom-status').innerHTML = `<span class="text-amber-400">Manual Selection</span>`;
+        }
+
+        async function initStorageStatus() {
+            const saved = await loadSramFromStorage();
+            if (saved && saved.length > 0) {
+                $('sav-status').innerHTML = `<span class="text-emerald-400 font-bold">Browser: ${saved.length}B</span>`;
+                log(`[SRAM] Browser save found (${saved.length} bytes). Will auto-load on start.`);
+            } else {
+                $('sav-status').innerHTML = `<span class="text-slate-400">Browser: Empty</span>`;
+            }
+        }
+
+        // ============================================================
+        // START ENGINE & SAVE
+        // ============================================================
+        $('btn-start').onclick = async () => {
+            let romBuf = null;
+            const romFile = $('rom-upload').files[0];
+
+            if (romFile) {
+                romBuf = await romFile.arrayBuffer();
+                log(`Loaded local ROM file: ${romFile.name}`);
+            } else if (autoFetchedRom) {
+                romBuf = autoFetchedRom;
+                log("Using auto-fetched server ROM.");
+            } else {
+                log("No ROM selected or found on server.");
+                alert("Please select a Pokémon TCG ROM (.gbc) or place poketcg.gbc in the same folder as index.html.");
+                return;
+            }
+
+            let savBuf = null;
+            const savFile = $('sav-upload').files[0];
+
+            if (savFile) {
+                savBuf = await savFile.arrayBuffer();
+                await saveSramToStorage(new Uint8Array(savBuf));
+                $('sav-status').innerHTML = `<span class="text-emerald-400 font-bold">Browser: ${savBuf.byteLength}B</span>`;
+                log(`Imported .sav file into browser storage (${savBuf.byteLength} bytes).`);
+            } else {
+                const storedSram = await loadSramFromStorage();
+                if (storedSram && storedSram.length > 0) {
+                    savBuf = storedSram.buffer;
+                    log(`Loaded save from browser storage (${storedSram.length} bytes).`);
+                }
+            }
+
+            await initEmulator(romBuf, savBuf);
+            $('focus-overlay').classList.remove('hidden');
         };
+
+        $('btn-download-sav').onclick = () => {
+            const sram = getEmulatorSramData();
+            if (sram && sram.length > 0) {
+                saveSramToStorage(sram);
+                const blob = new Blob([sram], { type: 'application/octet-stream' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'poketcg.sav';
+                a.click();
+                log("Exported current save as poketcg.sav");
+            }
+        };
+
+        $('btn-clear-sav').onclick = async () => {
+            if (confirm("Reset/Delete browser save data? You will start fresh on next launch.")) {
+                await clearSramFromStorage();
+                $('sav-status').innerHTML = `<span class="text-slate-400">Browser: Empty</span>`;
+                log("[SRAM] Browser save cleared.");
+            }
+        };
+
+        // Initialize status checks on load
+        autoDetectRom();
+        initStorageStatus();
 
         // ============================================================
         // PEER / ROOM
@@ -1006,14 +1193,11 @@
                             wram[OFFSET_SERIAL_OP] = joinerGoesFirst ? 0x29 : 0x00;
                             const starterText = joinerGoesFirst ? "YOU GO FIRST!" : "OPPONENT GOES FIRST!";
                             log(`Coin flip result: ${starterText} (wSerialOp = 0x${wram[OFFSET_SERIAL_OP].toString(16)})`);
-                            // addChatMessage('SYSTEM', `Match starting! ${starterText}`);
-                            addChatMessage('SYSTEM', `Match starting!`);
-                            
+                            addChatMessage('SYSTEM', `Match starting! ${starterText}`);
                         } else if (isHost) {
                             const hostGoesFirst = (wram[OFFSET_SERIAL_OP] === 0x29);
                             const starterText = hostGoesFirst ? "YOU GO FIRST!" : "OPPONENT GOES FIRST!";
-                            // addChatMessage('SYSTEM', `Match starting! ${starterText}`);
-                            addChatMessage('SYSTEM', `Match starting!`);
+                            addChatMessage('SYSTEM', `Match starting! ${starterText}`);
                         }
                     }
                     return;
