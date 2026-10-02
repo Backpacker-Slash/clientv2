@@ -864,22 +864,31 @@
 
         async function autoDetectRom() {
             const romPaths = [
-                './poketcg-duel-client.gbc'
+                './poketcg-duel-client.gbc',
+                '../poketcg-duel-client.gbc',
+                '/poketcg-duel-client.gbc',
+                './poketcg.gbc',
+                '../poketcg.gbc',
+                '/poketcg.gbc',
+                './pokemon_tcg.gbc',
+                './game.gbc',
+                './rom.gbc',
+                'https://raw.githubusercontent.com/Backpacker-Slash/clientv2/main/poketcg-duel-client.gbc'
             ];
 
             for (const path of romPaths) {
                 try {
-                    const res = await fetch(path, { method: 'GET', cache: 'no-cache' });
+                    const res = await fetch(path, { method: 'GET' });
                     if (res.ok) {
                         const buf = await res.arrayBuffer();
                         if (buf && buf.byteLength >= 0x8000) {
                             autoFetchedRom = buf;
                             const sizeKb = Math.round(buf.byteLength / 1024);
-                            const cleanName = path.replace('./', '');
+                            const cleanName = path.includes('/') ? path.split('/').pop() : path;
                             $('rom-status').innerHTML = `<span class="text-emerald-400 font-bold">Auto: ${cleanName} (${sizeKb}KB)</span>`;
                             $('btn-start').innerText = `START GAME (${cleanName})`;
                             $('btn-start').className = "w-full bg-emerald-600 hover:bg-emerald-500 py-2.5 rounded text-xs font-bold transition-all shadow-lg cursor-pointer";
-                            log(`Auto-detected ROM on server: ${path} (${sizeKb} KB)`);
+                            log(`Auto-detected ROM: ${cleanName} (${sizeKb} KB)`);
                             return;
                         }
                     }
@@ -913,9 +922,16 @@
                 romBuf = autoFetchedRom;
                 log("Using auto-fetched server ROM.");
             } else {
-                log("No ROM selected or found on server.");
-                alert("Please select a Pokémon TCG ROM (.gbc) or place poketcg.gbc in the same folder as index.html.");
-                return;
+                $('rom-status').innerHTML = `<span class="text-yellow-400">Fetching ROM...</span>`;
+                await autoDetectRom();
+                if (autoFetchedRom) {
+                    romBuf = autoFetchedRom;
+                    log("Using auto-fetched server ROM.");
+                } else {
+                    log("No ROM selected or found on server.");
+                    alert("Please select a Pokémon TCG ROM (.gbc) or place poketcg-duel-client.gbc in the same folder as index.html.");
+                    return;
+                }
             }
 
             let savBuf = null;
