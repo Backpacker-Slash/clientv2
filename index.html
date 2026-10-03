@@ -144,22 +144,29 @@
                         id="btn-start"
                         class="w-full bg-blue-600 hover:bg-blue-500 py-2.5 rounded text-xs font-bold transition-all shadow-lg cursor-pointer"
                     >
-                        START ENGINE
+                        START GAME
                     </button>
 
-                    <div class="grid grid-cols-2 gap-2 pt-1">
+                    <div class="grid grid-cols-3 gap-2 pt-1">
+                        <button
+                            id="btn-save-now"
+                            class="w-full bg-blue-700 hover:bg-blue-600 text-white py-1.5 rounded text-[11px] font-bold disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shadow flex items-center justify-center gap-1"
+                            disabled
+                        >
+                            💾 SAVE
+                        </button>
                         <button
                             id="btn-download-sav"
                             class="w-full bg-emerald-700 hover:bg-emerald-600 py-1.5 rounded text-[11px] font-bold disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                             disabled
                         >
-                            EXPORT .SAV
+                            EXPORT
                         </button>
                         <button
                             id="btn-clear-sav"
                             class="w-full bg-rose-900/60 hover:bg-rose-800 text-rose-300 py-1.5 rounded text-[11px] font-bold border border-rose-700/50 cursor-pointer"
                         >
-                            RESET SAVE
+                            RESET
                         </button>
                     </div>
                 </div>
@@ -551,6 +558,7 @@
 
             audio = new GameAudio(module, emulatorPtr);
             $('btn-download-sav').disabled = false;
+            $('btn-save-now').disabled = false;
             tick();
         }
 
@@ -575,9 +583,11 @@
         }
 
         // ============================================================
-        // MAIN EMULATION LOOP
+        // MAIN EMULATION LOOP & BACKGROUND HEARTBEAT
         // ============================================================
-        function tick() {
+        let lastTickTime = performance.now();
+
+        function stepEmulator() {
             if (!module || !emulatorPtr) return;
 
             const runUntil = getExport('emulator_run_until_f64');
@@ -590,6 +600,15 @@
                 if (res & 4) break;
             }
 
+            syncRamLogic();
+            handleSerialSendQueue();
+            processIncomingSerialQueue();
+            handleSerialPacketState();
+        }
+
+        function tick() {
+            stepEmulator();
+
             const getFb = getExport('get_frame_buffer_ptr');
             if (getFb) {
                 const fbPtr = getFb(emulatorPtr);
@@ -597,14 +616,19 @@
                 $('gb-canvas').getContext('2d').putImageData(new ImageData(frameData, 160, 144), 0, 0);
             }
 
-            syncRamLogic();
-            handleSerialSendQueue();
-            processIncomingSerialQueue();
-            handleSerialPacketState();
-
+            lastTickTime = performance.now();
             animationFrameReq = requestAnimationFrame(tick);
             updateDebugOverlay();
         }
+
+        // Background watchdog: If requestAnimationFrame pauses (e.g. taking screenshot,
+        // tab switched, or reader mode active), keep stepping the CPU and network queues!
+        setInterval(() => {
+            if (emulatorPtr && performance.now() - lastTickTime > 60) {
+                stepEmulator();
+                lastTickTime = performance.now();
+            }
+        }, 16);
 
         // ============================================================
         // MULTI-STAGE LOCKSTEP & RAM LOGIC
@@ -886,7 +910,7 @@
                             const sizeKb = Math.round(buf.byteLength / 1024);
                             const cleanName = path.includes('/') ? path.split('/').pop() : path;
                             $('rom-status').innerHTML = `<span class="text-emerald-400 font-bold">Auto: ${cleanName} (${sizeKb}KB)</span>`;
-                            $('btn-start').innerText = `START GAME (${cleanName})`;
+                            $('btn-start').innerText = "START GAME";
                             $('btn-start').className = "w-full bg-emerald-600 hover:bg-emerald-500 py-2.5 rounded text-xs font-bold transition-all shadow-lg cursor-pointer";
                             log(`Auto-detected ROM: ${cleanName} (${sizeKb} KB)`);
                             return;
@@ -952,6 +976,18 @@
 
             await initEmulator(romBuf, savBuf);
             $('focus-overlay').classList.remove('hidden');
+        };
+
+        $('btn-save-now').onclick = async () => {
+            if (!emulatorPtr) return;
+            const sram = getEmulatorSramData();
+            if (sram && sram.length > 0) {
+                await saveSramToStorage(sram);
+                log("[SRAM] Saved to browser storage.");
+                const oldText = $('btn-save-now').innerText;
+                $('btn-save-now').innerText = "✓ SAVED!";
+                setTimeout(() => { $('btn-save-now').innerText = oldText; }, 1500);
+            }
         };
 
         $('btn-download-sav').onclick = () => {
@@ -1083,8 +1119,10 @@
             });
 
             peer.on('error', err => {
-                log(`PeerJS ERROR: ${err.type || err.message || 'unknown'}`);
-                setConnectionStatus('LOBBY ERROR', 'text-red-500 font-bold uppercase');
+                log(`PeerJS Notice: ${err.type || err.message || 'unknown'}`);
+                if (!connection || !connection.open) {
+                    setConnectionStatus('LOBBY ERROR', 'text-red-500 font-bold uppercase');
+                }
             });
 
             isHost = true;
@@ -1111,8 +1149,10 @@
             });
 
             peer.on('error', err => {
-                log(`PeerJS ERROR: ${err.type || err.message || 'unknown'}`);
-                setConnectionStatus('LOBBY ERROR', 'text-red-500 font-bold uppercase');
+                log(`PeerJS Notice: ${err.type || err.message || 'unknown'}`);
+                if (!connection || !connection.open) {
+                    setConnectionStatus('LOBBY ERROR', 'text-red-500 font-bold uppercase');
+                }
             });
 
             isHost = false;
@@ -1205,11 +1245,12 @@
                             wram[OFFSET_SERIAL_OP] = joinerGoesFirst ? 0x29 : 0x00;
                             const starterText = joinerGoesFirst ? "YOU GO FIRST!" : "OPPONENT GOES FIRST!";
                             log(`Coin flip result: ${starterText} (wSerialOp = 0x${wram[OFFSET_SERIAL_OP].toString(16)})`);
-                            addChatMessage('SYSTEM', `Match starting! ${starterText}`);
+                            addChatMessage('SYSTEM', 'Match starting!');
                         } else if (isHost) {
                             const hostGoesFirst = (wram[OFFSET_SERIAL_OP] === 0x29);
                             const starterText = hostGoesFirst ? "YOU GO FIRST!" : "OPPONENT GOES FIRST!";
-                            addChatMessage('SYSTEM', `Match starting! ${starterText}`);
+                            log(`Coin flip result: ${starterText} (wSerialOp = 0x${wram[OFFSET_SERIAL_OP].toString(16)})`);
+                            addChatMessage('SYSTEM', 'Match starting!');
                         }
                     }
                     return;
@@ -1302,7 +1343,23 @@
             $('focus-overlay').classList.add('hidden');
         };
 
+        $('gb-canvas').onclick = () => {
+            $('gb-canvas').focus();
+        };
+
+        // When window regains focus (e.g. after screenshot tool or Alt-Tab), reset any stuck keys
+        window.addEventListener('focus', () => {
+            Object.keys(keyFuncs).forEach(code => {
+                if (keyFuncs[code]) keyFuncs[code](false);
+            });
+        });
+
         window.addEventListener('keydown', e => {
+            // Prevent accidental reader mode (F9 on Edge/Chrome)
+            if (e.code === 'F9') {
+                e.preventDefault();
+                return;
+            }
             if (keyFuncs[e.code] && document.activeElement.tagName !== 'INPUT') {
                 e.preventDefault();
                 keyFuncs[e.code](true);
