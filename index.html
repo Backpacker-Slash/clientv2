@@ -114,13 +114,33 @@
 
         #gb-canvas {
             image-rendering: pixelated;
+            image-rendering: -moz-crisp-edges;
             image-rendering: crisp-edges;
-            width: 100%;
-            aspect-ratio: 160 / 144;
-            height: auto;
+            /* Sized in JS to an exact integer multiple of 160×144 — never
+               stretch with width:100%, which causes uneven 2px/3px rows. */
+            width: 160px;
+            height: 144px;
+            max-width: 100%;
+            max-height: 100%;
             background: #000;
             outline: none;
             display: block;
+            flex-shrink: 0;
+        }
+
+        #gb-screen-wrap {
+            position: relative;
+            width: 100%;
+            max-width: 420px;
+            aspect-ratio: 160 / 144;
+            background: #000;
+            border-radius: 0.5rem;
+            overflow: hidden;
+            border: 1px solid #27272a;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         /* Power LED with silver ring */
@@ -311,39 +331,23 @@
             color: #fbcfe8;
         }
 
-        /* Phones: zero visual feedback on button presses.
-           Transitions + :active / .pressed style changes cause expensive
-           layout/paint on every rapid A/B tap and contend with the emulator. */
+        /* Phones: avoid the expensive pressed-state paint on every touch. */
         @media (hover: none) and (pointer: coarse) {
-            .dpad-btn,
-            .btn-action,
-            .btn-pill {
-                transition: none !important;
-            }
             .dpad-btn:active,
             .dpad-btn.pressed,
             .btn-action:active,
             .btn-action.pressed,
             .btn-pill:active,
             .btn-pill.pressed {
-                background: inherit !important;
-                box-shadow: inherit !important;
-                transform: none !important;
-                color: inherit !important;
-                filter: none !important;
-                opacity: 1 !important;
+                background: inherit;
+                box-shadow: inherit;
+                transform: none;
             }
             .dpad-btn:active span,
             .dpad-btn.pressed span {
-                color: inherit !important;
-                transform: none !important;
-                text-shadow: inherit !important;
-            }
-            /* Keep A/B appearance identical while pressed */
-            .btn-action:active,
-            .btn-action.pressed {
-                background: var(--action-btn-bg) !important;
-                color: #fff1f2 !important;
+                color: inherit;
+                transform: none;
+                text-shadow: inherit;
             }
         }
 
@@ -658,8 +662,8 @@
                         </div>
                     </div>
 
-                    <!-- Screen Canvas Container -->
-                    <div class="relative w-full aspect-[160/144] max-w-[420px] bg-black rounded-lg overflow-hidden border border-zinc-800 shadow-2xl flex items-center justify-center">
+                    <!-- Screen Canvas Container — integer-scaled 160×144 via JS -->
+                    <div id="gb-screen-wrap" class="relative">
                         <canvas id="gb-canvas" width="160" height="144" tabindex="0" class="cursor-pointer"></canvas>
 
                         <!-- Screen Start Overlay (in the middle of the Game Boy screen) -->
@@ -1021,6 +1025,10 @@
             constructor(m, e) {
                 this.ctx = new (window.AudioContext || window.webkitAudioContext)();
                 this.module = m;
+                this.muted = false;
+                this.gain = this.ctx.createGain();
+                this.gain.gain.value = 1;
+                this.gain.connect(this.ctx.destination);
                 const getPtr = getExport('get_audio_buffer_ptr');
                 const getCap = getExport('get_audio_buffer_capacity');
                 if (getPtr && getCap) {
@@ -1031,12 +1039,32 @@
                 this.startSec = 0;
             }
 
-            push() {
-                if (!this.ctx) return;
-                if (this.ctx.state === 'suspended') {
+            setMuted(muted) {
+                this.muted = !!muted;
+                if (this.gain) {
+                    this.gain.gain.value = this.muted ? 0 : 1;
+                }
+                const icon = $('audio-icon');
+                if (icon) icon.innerText = this.muted ? '🔇' : '🔊';
+            }
+
+            toggleMute() {
+                this.setMuted(!this.muted);
+                // Unmuting should also resume a suspended context (autoplay policy).
+                if (!this.muted && this.ctx && this.ctx.state === 'suspended') {
                     this.ctx.resume();
+                }
+                return this.muted;
+            }
+
+            push() {
+                if (!this.ctx || this.muted) return;
+                if (this.ctx.state === 'suspended') {
+                    // Do not auto-resume here — user gesture is required on many browsers.
                     return;
                 }
+                if (!this.buffer) return;
+
                 const nowSec = this.ctx.currentTime;
                 const latency = 0.08;
                 if (!this.startSec || this.startSec < nowSec || this.startSec > nowSec + 0.25) {
@@ -1044,23 +1072,65 @@
                 }
 
                 const frames = 4096;
-                const buffer = this.ctx.createBuffer(2, frames, this.ctx.sampleRate);
+                // Guard against buffer underrun if WASM capacity is smaller.
+                const maxSamples = Math.floor((this.buffer.length || 0) / 2);
+                const useFrames = Math.min(frames, maxSamples || frames);
+
+                const buffer = this.ctx.createBuffer(2, useFrames, this.ctx.sampleRate);
                 const c0 = buffer.getChannelData(0);
                 const c1 = buffer.getChannelData(1);
 
-                for (let i = 0; i < frames; i++) {
+                for (let i = 0; i < useFrames; i++) {
                     c0[i] = (this.buffer[2 * i] / 255) * 0.4;
                     c1[i] = (this.buffer[2 * i + 1] / 255) * 0.4;
                 }
 
                 const source = this.ctx.createBufferSource();
                 source.buffer = buffer;
-                source.connect(this.ctx.destination);
+                source.connect(this.gain);
                 source.onended = () => {
                     try { source.disconnect(); } catch (_) {}
                 };
                 source.start(this.startSec);
-                this.startSec += frames / this.ctx.sampleRate;
+                this.startSec += useFrames / this.ctx.sampleRate;
+            }
+        }
+
+        // ============================================================
+        // INTEGER PIXEL SCALE (no fractional 2px/3px rows or columns)
+        // ============================================================
+        let _lastCanvasScale = 0;
+
+        function fitCanvasIntegerScale() {
+            const canvas = $('gb-canvas');
+            const wrap = $('gb-screen-wrap');
+            if (!canvas || !wrap) return;
+
+            // Available space inside the bezel container.
+            const availW = wrap.clientWidth || wrap.offsetWidth || 320;
+            const availH = wrap.clientHeight || wrap.offsetHeight || 288;
+            if (availW < 1 || availH < 1) return;
+
+            // Largest integer scale that fits both axes (no fractional pixels).
+            const scale = Math.max(1, Math.floor(Math.min(availW / 160, availH / 144)));
+            if (scale === _lastCanvasScale &&
+                canvas.style.width === (160 * scale) + 'px') {
+                return;
+            }
+            _lastCanvasScale = scale;
+
+            const cssW = 160 * scale;
+            const cssH = 144 * scale;
+
+            // CSS display size = exact integer multiple. Browser nearest-neighbor
+            // upscales the 160×144 backing store via image-rendering: pixelated.
+            canvas.style.width = cssW + 'px';
+            canvas.style.height = cssH + 'px';
+
+            // Only reset the backing store if something changed it.
+            if (canvas.width !== 160 || canvas.height !== 144) {
+                canvas.width = 160;
+                canvas.height = 144;
             }
         }
 
@@ -1220,6 +1290,16 @@
             // Clean up any held button states
             resetAllButtons();
 
+            // Size canvas to exact integer multiple of 160×144 after layout settles.
+            requestAnimationFrame(() => {
+                fitCanvasIntegerScale();
+                // Second pass after fonts/bezel may reflow
+                setTimeout(fitCanvasIntegerScale, 50);
+            });
+
+            // Sync mute icon with fresh audio instance
+            if (audio) audio.setMuted(false);
+
             tick();
         }
 
@@ -1251,22 +1331,19 @@
         // with the emulator on some mobile browsers.
         const ENABLE_HAPTIC_FEEDBACK = false;
 
-        // On phones, zero visual feedback (CSS + JS). Avoid classList / DOM work
-        // in the hot touch-input path so rapid A/B taps do not contend with
-        // the emulator loop.
-        const IS_COARSE_POINTER = !!(
+        // On phones, native CSS :active already provides the button-pressed
+        // appearance. Avoid classList/DOM work in the hot touch-input path;
+        // this keeps rapid A/B tapping from competing with the emulator loop.
+        const USE_JS_VISUAL_FEEDBACK = !(
             window.matchMedia &&
             window.matchMedia('(hover: none) and (pointer: coarse)').matches
         );
-        const USE_JS_VISUAL_FEEDBACK = !IS_COARSE_POINTER;
 
         // Action-button touch/pointer state is kept globally so resetAllButtons()
-        // can clear it. Delegated listeners survive DOM replacement during Reset.
+        // can clear it. Delegated pointer listeners below also survive DOM
+        // replacement, which avoids the old reset/input-listener problem.
         const actionPointerIds = new Map();
         const actionPointerToButton = new Map();
-        // Mobile touch-identifier tracking for A/B/Select/Start (mirrors D-pad).
-        const actionTouchIds = new Map(); // touchId -> btn
-        const actionBtnTouchCounts = Object.create(null); // btn -> active touch count
 
         function refreshButtonElementCache() {
             buttonElementCache.clear();
@@ -1298,14 +1375,13 @@
 
         function setButtonState(btn, isPressed) {
             const state = !!isPressed;
-            // Early-out: avoid Set / object writes when nothing changed.
-            if (desiredButtonStates[btn] === state) return;
-
             if (state) pressedButtons.add(btn);
             else pressedButtons.delete(btn);
             desiredButtonStates[btn] = state;
 
-            // Desktop/pen/mouse only. Mobile CSS forces zero visual feedback.
+            // Only desktop/pen/mouse gets JS visual feedback. On touch devices
+            // we leave painting entirely to the browser (and mobile CSS
+            // disables the expensive pressed styles).
             if (USE_JS_VISUAL_FEEDBACK) {
                 const els = getButtonElements(btn);
                 els.forEach(el => el.classList.toggle('pressed', state));
@@ -1342,10 +1418,6 @@
             pressedButtons.clear();
             actionPointerIds.clear();
             actionPointerToButton.clear();
-            actionTouchIds.clear();
-            for (const k of Object.keys(actionBtnTouchCounts)) {
-                actionBtnTouchCounts[k] = 0;
-            }
 
             for (const btn of all) {
                 desiredButtonStates[btn] = false;
@@ -1481,8 +1553,9 @@
             }
 
             // Action & Pill Buttons
-            // Mobile (coarse pointer): pure TouchEvents — no setPointerCapture,
-            // no closest() on every move, no classList. Desktop: PointerEvents.
+            // Delegated Pointer Events handle mouse + touch through one stable
+            // listener. Because the listener lives on document, replacing the
+            // emulator/UI during Reset does not make the controls stop working.
             const isActionButton = (target) => {
                 const el = target instanceof Element
                     ? target.closest('[data-gb-btn]:not(.dpad-btn)')
@@ -1490,86 +1563,46 @@
                 return el || null;
             };
 
-            if (IS_COARSE_POINTER) {
-                // ---- MOBILE: TouchEvent path (cheapest for rapid A/B spam) ----
-                document.addEventListener('touchstart', (e) => {
-                    let handled = false;
-                    for (let i = 0; i < e.changedTouches.length; i++) {
-                        const t = e.changedTouches[i];
-                        const el = isActionButton(t.target);
-                        if (!el) continue;
-                        const btn = el.getAttribute('data-gb-btn');
-                        if (!btn) continue;
-                        handled = true;
-                        actionTouchIds.set(t.identifier, btn);
-                        actionBtnTouchCounts[btn] = (actionBtnTouchCounts[btn] || 0) + 1;
-                        if (actionBtnTouchCounts[btn] === 1) {
-                            setButtonState(btn, true);
-                        }
+            document.addEventListener('pointerdown', (e) => {
+                const el = isActionButton(e.target);
+                if (!el) return;
+
+                e.preventDefault();
+                e.stopPropagation();
+
+                const btn = el.getAttribute('data-gb-btn');
+                if (!btn) return;
+
+                if (!actionPointerIds.has(btn)) actionPointerIds.set(btn, new Set());
+                actionPointerIds.get(btn).add(e.pointerId);
+                actionPointerToButton.set(e.pointerId, btn);
+
+                try { el.setPointerCapture(e.pointerId); } catch (_) {}
+
+                setButtonState(btn, true);
+            }, { passive: false });
+
+            const releaseActionPointer = (e) => {
+                // Release using pointerId rather than event.target. This keeps
+                // the button state correct even if the pointer leaves the button
+                // or the browser retargets the event.
+                const btn = actionPointerToButton.get(e.pointerId);
+                if (!btn) return;
+
+                actionPointerToButton.delete(e.pointerId);
+
+                const ids = actionPointerIds.get(btn);
+                if (ids) {
+                    ids.delete(e.pointerId);
+                    if (ids.size === 0) {
+                        actionPointerIds.delete(btn);
+                        setButtonState(btn, false);
                     }
-                    if (handled) {
-                        e.preventDefault();
-                        if (audio?.ctx?.state === 'suspended') audio.ctx.resume();
-                    }
-                }, { passive: false });
+                }
+            };
 
-                const endActionTouch = (e) => {
-                    for (let i = 0; i < e.changedTouches.length; i++) {
-                        const t = e.changedTouches[i];
-                        const btn = actionTouchIds.get(t.identifier);
-                        if (!btn) continue;
-                        actionTouchIds.delete(t.identifier);
-                        const count = (actionBtnTouchCounts[btn] || 1) - 1;
-                        actionBtnTouchCounts[btn] = count;
-                        if (count <= 0) {
-                            actionBtnTouchCounts[btn] = 0;
-                            setButtonState(btn, false);
-                        }
-                    }
-                };
-
-                document.addEventListener('touchend', endActionTouch, { passive: true });
-                document.addEventListener('touchcancel', endActionTouch, { passive: true });
-            } else {
-                // ---- DESKTOP / PEN: PointerEvents ----
-                document.addEventListener('pointerdown', (e) => {
-                    if (e.pointerType === 'touch') return; // handled above if coarse
-                    const el = isActionButton(e.target);
-                    if (!el) return;
-
-                    e.preventDefault();
-
-                    const btn = el.getAttribute('data-gb-btn');
-                    if (!btn) return;
-
-                    if (!actionPointerIds.has(btn)) actionPointerIds.set(btn, new Set());
-                    actionPointerIds.get(btn).add(e.pointerId);
-                    actionPointerToButton.set(e.pointerId, btn);
-
-                    try { el.setPointerCapture(e.pointerId); } catch (_) {}
-
-                    setButtonState(btn, true);
-                }, { passive: false });
-
-                const releaseActionPointer = (e) => {
-                    const btn = actionPointerToButton.get(e.pointerId);
-                    if (!btn) return;
-
-                    actionPointerToButton.delete(e.pointerId);
-
-                    const ids = actionPointerIds.get(btn);
-                    if (ids) {
-                        ids.delete(e.pointerId);
-                        if (ids.size === 0) {
-                            actionPointerIds.delete(btn);
-                            setButtonState(btn, false);
-                        }
-                    }
-                };
-
-                document.addEventListener('pointerup', releaseActionPointer, { passive: true });
-                document.addEventListener('pointercancel', releaseActionPointer, { passive: true });
-            }
+            document.addEventListener('pointerup', releaseActionPointer, { passive: false });
+            document.addEventListener('pointercancel', releaseActionPointer, { passive: false });
 
             // ========================================================
             // KEYBOARD CONTROLS (DESKTOP)
@@ -1694,18 +1727,32 @@
                 };
             }
 
-            // Audio Toggle / Resume button
+            // Audio Mute / Resume button
             const btnAudio = $('btn-audio-toggle');
             if (btnAudio) {
                 btnAudio.onclick = () => {
-                    if (!audio?.ctx) return;
-                    if (audio.ctx.state === 'suspended') {
-                        audio.ctx.resume();
-                        $('audio-icon').innerText = '🔊';
-                    } else if (audio.ctx.state === 'running') {
-                        $('audio-icon').innerText = '🔊';
+                    if (!audio?.ctx) {
+                        // Emulator not started yet — nothing to mute.
+                        return;
                     }
+                    // Always try to resume first if the context is suspended
+                    // (browser autoplay policy), then toggle mute.
+                    if (audio.ctx.state === 'suspended') {
+                        audio.ctx.resume().then(() => {
+                            audio.setMuted(false);
+                        }).catch(() => {});
+                        return;
+                    }
+                    audio.toggleMute();
                 };
+            }
+
+            // Integer-scale the GB screen whenever the layout changes.
+            fitCanvasIntegerScale();
+            window.addEventListener('resize', fitCanvasIntegerScale);
+            // Orientation / visual viewport changes on phones
+            if (window.visualViewport) {
+                window.visualViewport.addEventListener('resize', fitCanvasIntegerScale);
             }
         }
 
@@ -2529,21 +2576,28 @@
         };
 
         $('focus-overlay').onclick = () => {
-            audio?.ctx.resume();
+            if (audio?.ctx) {
+                audio.ctx.resume();
+                audio.setMuted(false);
+            }
             $('gb-canvas').focus();
             $('focus-overlay').classList.add('hidden');
         };
 
         $('gb-canvas').onclick = () => {
             $('gb-canvas').focus();
+            if (audio?.ctx?.state === 'suspended') {
+                audio.ctx.resume();
+            }
         };
 
         // Ensure input listeners are active immediately
         window.addEventListener('DOMContentLoaded', () => {
             setupInput();
+            fitCanvasIntegerScale();
         });
         setupInput();
+        fitCanvasIntegerScale();
     </script>
 </body>
 </html>
-
