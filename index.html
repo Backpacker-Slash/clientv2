@@ -576,9 +576,19 @@
 
             <!-- System Logs -->
             <div id="panel-logs-col" class="bg-slate-900/90 p-4 rounded-2xl border border-slate-800 shadow-lg flex flex-col overflow-hidden max-h-[300px]">
-                <h3 class="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider font-mono">
-                    System Log
-                </h3>
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider font-mono">
+                        System Log
+                    </h3>
+                    <button
+                        id="btn-copy-logs"
+                        type="button"
+                        class="bg-slate-800 hover:bg-slate-700 active:scale-95 text-sky-400 hover:text-sky-300 text-[10px] font-mono font-bold px-2 py-0.5 rounded-lg border border-slate-700 transition flex items-center gap-1 cursor-pointer"
+                        title="Copy entire logs content to clipboard"
+                    >
+                        <span>📋</span> <span id="copy-logs-text">COPY LOGS</span>
+                    </button>
+                </div>
 
                 <div
                     id="system-logs"
@@ -817,13 +827,56 @@
     <script>
         const $ = (id) => document.getElementById(id);
 
+        const logHistory = ["[Ready to load files...]"];
+
         const log = (msg) => {
+            const timeStr = new Date().toLocaleTimeString();
+            const formatted = `[${timeStr}] ${msg}`;
+            logHistory.push(formatted);
             const div = document.createElement('div');
             div.className = 'log-line';
-            div.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
-            $('system-logs').appendChild(div);
-            $('system-logs').scrollTop = $('system-logs').scrollHeight;
+            div.innerText = formatted;
+            const container = $('system-logs');
+            if (container) {
+                container.appendChild(div);
+                container.scrollTop = container.scrollHeight;
+            }
         };
+
+        const copyLogsToClipboard = async () => {
+            const logsEl = $('system-logs');
+            const textToCopy = logHistory.length > 0 
+                ? logHistory.join('\n') 
+                : (logsEl ? Array.from(logsEl.querySelectorAll('.log-line')).map(l => l.innerText.trim()).join('\n') : '');
+
+            if (!textToCopy) return;
+
+            try {
+                await navigator.clipboard.writeText(textToCopy);
+            } catch (_) {
+                const ta = document.createElement('textarea');
+                ta.value = textToCopy;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.focus();
+                ta.select();
+                try { document.execCommand('copy'); } catch (_) {}
+                document.body.removeChild(ta);
+            }
+
+            const btnText = $('copy-logs-text');
+            if (btnText) {
+                const orig = btnText.innerText;
+                btnText.innerText = 'COPIED!';
+                setTimeout(() => { btnText.innerText = orig; }, 1500);
+            }
+        };
+
+        const btnCopyLogs = $('btn-copy-logs');
+        if (btnCopyLogs) {
+            btnCopyLogs.onclick = copyLogsToClipboard;
+        }
 
         // ============================================================
         // RAM OFFSETS (Base address = $C000)
