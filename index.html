@@ -1172,36 +1172,40 @@
                 pLed.className = 'w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981] border border-emerald-400 transition-all';
             }
 
+            // Clean up any held button states
+            resetAllButtons();
+
             tick();
         }
 
-        const joypadFns = {};
+        const JOYPAD_EXPORT_NAMES = {
+            up: 'set_joyp_up',
+            down: 'set_joyp_down',
+            left: 'set_joyp_left',
+            right: 'set_joyp_right',
+            A: 'set_joyp_A',
+            B: 'set_joyp_B',
+            start: 'set_joyp_start',
+            select: 'set_joyp_select'
+        };
+
         const pressedButtons = new Set();
 
         function setButtonState(btn, isPressed) {
             if (isPressed) pressedButtons.add(btn);
             else pressedButtons.delete(btn);
 
-            if (emulatorPtr) {
-                if (!joypadFns[btn]) {
-                    const fnName = {
-                        up: 'set_joyp_up',
-                        down: 'set_joyp_down',
-                        left: 'set_joyp_left',
-                        right: 'set_joyp_right',
-                        A: 'set_joyp_A',
-                        B: 'set_joyp_B',
-                        start: 'set_joyp_start',
-                        select: 'set_joyp_select'
-                    }[btn];
-                    if (fnName) {
-                        const fn = getExport(fnName);
-                        if (fn) joypadFns[btn] = (val) => fn(emulatorPtr, val);
+            if (emulatorPtr && module) {
+                const exportName = JOYPAD_EXPORT_NAMES[btn];
+                if (exportName) {
+                    const fn = getExport(exportName);
+                    if (fn) {
+                        try {
+                            fn(emulatorPtr, isPressed ? 1 : 0);
+                        } catch (err) {
+                            console.error('Error sending joypad input:', err);
+                        }
                     }
-                }
-
-                if (joypadFns[btn]) {
-                    joypadFns[btn](isPressed);
                 }
             }
 
@@ -1220,7 +1224,20 @@
 
         function resetAllButtons() {
             const all = ['up', 'down', 'left', 'right', 'A', 'B', 'start', 'select'];
-            all.forEach(btn => setButtonState(btn, false));
+            all.forEach(btn => {
+                pressedButtons.delete(btn);
+                if (emulatorPtr && module) {
+                    const exportName = JOYPAD_EXPORT_NAMES[btn];
+                    if (exportName) {
+                        const fn = getExport(exportName);
+                        if (fn) {
+                            try { fn(emulatorPtr, 0); } catch (_) {}
+                        }
+                    }
+                }
+                const els = document.querySelectorAll(`[data-gb-btn="${btn}"]`);
+                els.forEach(el => el.classList.remove('pressed'));
+            });
         }
 
         let inputSetupDone = false;
@@ -1968,6 +1985,8 @@
                 const storedSram = await loadSramFromStorage();
                 const savBuf = storedSram ? storedSram.buffer : currentSavBuffer;
                 await initEmulator(currentRomBuffer, savBuf);
+                resetAllButtons();
+                $('gb-canvas')?.focus();
                 log("Game reset successfully.");
             };
         }
