@@ -438,31 +438,44 @@
             </div>
         </div>
 
-        <div class="flex flex-wrap items-center gap-2 sm:gap-3">
-            <!-- Room Code with Click-to-Copy -->
-            <button id="btn-copy-code" type="button" title="Click to copy room code" class="bg-slate-950 px-3 py-1 rounded-xl border border-slate-800 text-right cursor-pointer hover:border-sky-500 transition group">
-                <div class="text-[9px] text-slate-500 group-hover:text-sky-400 uppercase font-semibold tracking-wider font-mono flex items-center gap-1 justify-end">
-                    <span>Room Code</span>
-                    <span class="text-[8px]">📋</span>
-                </div>
-                <div id="room-code" class="text-xs sm:text-sm font-bold text-sky-400 tracking-widest font-mono">------</div>
-            </button>
+        <!-- RIGHT CONTROLS: START GAME IN TOP-RIGHT, ROOM & JOIN BELOW -->
+        <div class="flex flex-col items-end gap-2">
+            <!-- TOP ROW: START GAME & AUDIO -->
+            <div class="flex items-center gap-2">
+                <button
+                    id="btn-start"
+                    class="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white px-4 py-1.5 rounded-xl text-xs font-bold transition-all shadow-[0_0_15px_rgba(16,185,129,0.35)] cursor-pointer tracking-wider uppercase font-mono flex items-center gap-1.5 border border-emerald-400/30"
+                >
+                    <span class="text-[10px]">▶</span> START GAME
+                </button>
 
-            <button id="btn-host" class="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white px-3 sm:px-3.5 py-1.5 rounded-xl text-xs font-bold transition shadow-md cursor-pointer">
-                HOST
-            </button>
-
-            <div class="flex items-center gap-1 sm:gap-1.5">
-                <input type="text" id="remote-id" placeholder="CODE" maxlength="6" class="bg-slate-950 border border-slate-700 px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-mono uppercase tracking-widest focus:outline-none focus:border-blue-500 w-20 sm:w-28 text-center text-white placeholder-slate-600">
-                <button id="btn-connect" class="bg-blue-600 hover:bg-blue-500 active:scale-95 text-white px-3 sm:px-3.5 py-1.5 rounded-xl text-xs font-bold transition shadow-md cursor-pointer">
-                    JOIN
+                <button id="btn-audio-toggle" type="button" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-xl text-xs font-mono cursor-pointer transition flex items-center gap-1" title="Toggle / Resume Audio">
+                    <span id="audio-icon">🔊</span>
                 </button>
             </div>
 
-            <!-- Audio Resume / Sound Button -->
-            <button id="btn-audio-toggle" type="button" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-xl text-xs font-mono cursor-pointer transition flex items-center gap-1" title="Toggle / Resume Audio">
-                <span id="audio-icon">🔊</span>
-            </button>
+            <!-- BOTTOM ROW: ROOM CODE, HOST, CODE INPUT, JOIN -->
+            <div class="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
+                <!-- Room Code with Click-to-Copy -->
+                <button id="btn-copy-code" type="button" title="Click to copy room code" class="bg-slate-950 px-2.5 py-1 rounded-xl border border-slate-800 text-right cursor-pointer hover:border-sky-500 transition group">
+                    <div class="text-[8px] sm:text-[9px] text-slate-500 group-hover:text-sky-400 uppercase font-semibold tracking-wider font-mono flex items-center gap-1 justify-end">
+                        <span>Room</span>
+                        <span class="text-[8px]">📋</span>
+                    </div>
+                    <div id="room-code" class="text-xs sm:text-sm font-bold text-sky-400 tracking-widest font-mono">------</div>
+                </button>
+
+                <button id="btn-host" class="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-md cursor-pointer">
+                    HOST
+                </button>
+
+                <div class="flex items-center gap-1">
+                    <input type="text" id="remote-id" placeholder="CODE" maxlength="6" class="bg-slate-950 border border-slate-700 px-2 py-1.5 rounded-xl text-xs font-mono uppercase tracking-widest focus:outline-none focus:border-blue-500 w-16 sm:w-24 text-center text-white placeholder-slate-600">
+                    <button id="btn-connect" class="bg-blue-600 hover:bg-blue-500 active:scale-95 text-white px-2.5 sm:px-3.5 py-1.5 rounded-xl text-xs font-bold transition shadow-md cursor-pointer">
+                        JOIN
+                    </button>
+                </div>
+            </div>
         </div>
     </header>
 
@@ -506,13 +519,6 @@
                         >
                         <p class="text-[9px] text-slate-500 mt-1">Auto-saves to browser IndexedDB</p>
                     </div>
-
-                    <button
-                        id="btn-start"
-                        class="w-full bg-blue-600 hover:bg-blue-500 active:scale-98 py-2.5 rounded-xl text-xs font-bold transition-all shadow-lg cursor-pointer tracking-wider uppercase text-white font-mono"
-                    >
-                        START GAME
-                    </button>
 
                     <div class="grid grid-cols-3 gap-2 pt-1 font-mono">
                         <button
@@ -1808,8 +1814,8 @@
                             const sizeKb = Math.round(buf.byteLength / 1024);
                             const cleanName = path.includes('/') ? path.split('/').pop() : path;
                             $('rom-status').innerHTML = `<span class="text-emerald-400 font-bold">Auto: ${cleanName} (${sizeKb}KB)</span>`;
-                            $('btn-start').innerText = "START GAME";
-                            $('btn-start').className = "w-full bg-emerald-600 hover:bg-emerald-500 py-2.5 rounded text-xs font-bold transition-all shadow-lg cursor-pointer";
+                            $('btn-start').innerHTML = `<span>▶</span> START GAME`;
+                            $('btn-start').className = "bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white px-4 py-1.5 rounded-xl text-xs font-bold transition-all shadow-[0_0_15px_rgba(16,185,129,0.35)] cursor-pointer tracking-wider uppercase font-mono flex items-center gap-1.5 border border-emerald-400/30";
                             log(`Auto-detected ROM: ${cleanName} (${sizeKb} KB)`);
                             return;
                         }
@@ -1873,6 +1879,7 @@
             }
 
             await initEmulator(romBuf, savBuf);
+            $('btn-start').innerHTML = `<span>🔄</span> RESTART`;
             $('focus-overlay').classList.remove('hidden');
         };
 
@@ -1970,6 +1977,13 @@
         };
 
         function updateDebugOverlay() {
+            // Remove / hide debug overlay in phone mode (< 1024px)
+            if (window.innerWidth < 1024) {
+                const el = $('debug-overlay');
+                if (el) el.remove();
+                return;
+            }
+
             const wram = getWram();
             if (!wram) return;
 
