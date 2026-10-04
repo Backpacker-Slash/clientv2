@@ -1130,18 +1130,15 @@
         }
 
         // ============================================================
-        // INTEGER PIXEL SCALE — max size, uniform pixels
+        // INTEGER PIXEL SCALE — device pixels (fixes fractional DPR)
         // ============================================================
-        // Strategy:
-        //  • Pick the largest integer CSS scale (×1, ×2, ×3…) that fits.
-        //  • Canvas backing store == CSS size (1:1). Upscale 160×144 with
-        //    nearest-neighbor in software via drawImage + imageSmoothing off.
-        //  • Never use width:100% (that causes 2px/3px uneven rows).
+        // Your log: dpr=1.1 (Windows 110% display scaling).
+        // ×3 CSS × 1.1 = 475.2 device px height → uneven 2px/3px rows.
         //
-        // Note on phones: CSS width is NOT physical pixels. A 720×1280 phone
-        // at DPR 2 has window.innerWidth ≈ 360. Max scale is floor(360/160)=2
-        // → 320 CSS px = 640 physical px (not ×4 — ×4 would need 640 CSS px).
-        let _lastCssScale = 0;
+        // Fix: pick an integer number of *device* pixels per GB pixel.
+        // Canvas buffer = 160×S by 144×S. CSS size = buffer/dpr.
+        // Browser then maps the buffer 1:1 onto the physical screen.
+        let _lastDeviceScale = 0;
         let _frameSrcCanvas = null;
         let _frameSrcCtx = null;
         let _displayCtx = null;
@@ -1169,48 +1166,52 @@
             const wrap = $('gb-screen-wrap');
             if (!canvas || !wrap) return;
 
+            const dpr = window.devicePixelRatio || 1;
             const vw = document.documentElement.clientWidth || window.innerWidth || 360;
             const vh = window.innerHeight || 640;
             const isMobile = vw < 1024;
 
-            let availW, availH;
+            let availCssW, availCssH;
             if (isMobile) {
-                // Use almost the full CSS viewport. Chassis/bezel padding is
-                // kept minimal via CSS so ×2 fits on a typical 360-wide phone.
-                // Side gutter: 4px total. Bezel chrome ~12px total (0.4rem×2).
-                availW = Math.max(160, vw - 4 - 12);
-                // Reserve header + D-pad/actions + mobile tabs.
-                const reservedY = 52 /*header*/ + 44 /*tabs*/ + 190 /*controls*/ + 8;
-                availH = Math.max(144, vh - reservedY);
+                availCssW = Math.max(160, vw - 4 - 12);
+                const reservedY = 52 + 44 + 190 + 8;
+                availCssH = Math.max(144, vh - reservedY);
             } else {
                 const chassis = $('gb-chassis');
                 const centerCol = chassis?.parentElement;
                 const colW = centerCol?.clientWidth || 560;
-                // Desktop bezel padding ~20px total
-                availW = Math.max(160, colW - 24);
-                availH = Math.max(144, Math.min(vh * 0.65, availW * (144 / 160) + 16));
+                availCssW = Math.max(160, colW - 24);
+                availCssH = Math.max(144, Math.min(vh * 0.65, availCssW * (144 / 160) + 16));
             }
 
-            const cssScale = Math.max(1, Math.floor(Math.min(availW / 160, availH / 144)));
-            const cssW = 160 * cssScale;
-            const cssH = 144 * cssScale;
+            // Work in device pixels so height and width both land on integers.
+            const availDevW = availCssW * dpr;
+            const availDevH = availCssH * dpr;
+            const deviceScale = Math.max(1, Math.floor(Math.min(
+                availDevW / 160,
+                availDevH / 144
+            )));
 
-            if (cssScale === _lastCssScale &&
-                canvas.width === cssW &&
+            const bufW = 160 * deviceScale;
+            const bufH = 144 * deviceScale;
+            const cssW = bufW / dpr;
+            const cssH = bufH / dpr;
+
+            if (deviceScale === _lastDeviceScale &&
+                canvas.width === bufW &&
                 canvas.style.width === cssW + 'px') {
                 return;
             }
-            _lastCssScale = cssScale;
+            _lastDeviceScale = deviceScale;
 
-            // 1:1 CSS ↔ buffer — integer multiples only, no fractional stretch.
             canvas.style.width = cssW + 'px';
             canvas.style.height = cssH + 'px';
             wrap.style.width = cssW + 'px';
             wrap.style.height = cssH + 'px';
 
-            if (canvas.width !== cssW || canvas.height !== cssH) {
-                canvas.width = cssW;
-                canvas.height = cssH;
+            if (canvas.width !== bufW || canvas.height !== bufH) {
+                canvas.width = bufW;
+                canvas.height = bufH;
                 _displayCtx = null;
             }
 
@@ -1219,17 +1220,13 @@
             }
             disableSmoothing(_displayCtx);
 
-            // Optional debug in system log once per scale change
             if (typeof log === 'function') {
-                const dpr = window.devicePixelRatio || 1;
-                log(`[SCALE] ×${cssScale} → ${cssW}×${cssH} CSS (${Math.round(cssW * dpr)}×${Math.round(cssH * dpr)} device px, dpr=${dpr})`);
+                log(`[SCALE] ×${deviceScale} device px/src → buffer ${bufW}×${bufH}, CSS ${cssW.toFixed(1)}×${cssH.toFixed(1)}, dpr=${dpr}`);
             }
         }
 
         function blitFrame(frameData) {
             const { canvas: src, ctx: srcCtx } = getFrameSrc();
-            // ImageData needs a detached copy on some browsers when the source
-            // is a WASM heap view; slice only if the constructor would throw.
             let img;
             try {
                 img = new ImageData(frameData, 160, 144);
@@ -1244,7 +1241,7 @@
                 _displayCtx = canvas.getContext('2d', { alpha: false });
             }
             disableSmoothing(_displayCtx);
-            // Nearest-neighbor upscale 160×144 → integer CSS size.
+            // Each GB pixel → deviceScale×deviceScale identical device pixels.
             _displayCtx.drawImage(src, 0, 0, 160, 144, 0, 0, canvas.width, canvas.height);
         }
 
