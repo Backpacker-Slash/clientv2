@@ -311,6 +311,26 @@
             color: #fbcfe8;
         }
 
+        /* Phones: avoid the expensive pressed-state paint on every touch. */
+        @media (hover: none) and (pointer: coarse) {
+            .dpad-btn:active,
+            .dpad-btn.pressed,
+            .btn-action:active,
+            .btn-action.pressed,
+            .btn-pill:active,
+            .btn-pill.pressed {
+                background: inherit;
+                box-shadow: inherit;
+                transform: none;
+            }
+            .dpad-btn:active span,
+            .dpad-btn.pressed span {
+                color: inherit;
+                transform: none;
+                text-shadow: inherit;
+            }
+        }
+
         /* Pill Buttons (Select & Start) */
         .pill-pod {
             background: #0b0f17;
@@ -1256,37 +1276,45 @@
             }
         }
 
-        function setButtonState(btn, isPressed) {
-            if (isPressed) pressedButtons.add(btn);
-            else pressedButtons.delete(btn);
+        const desiredButtonStates = Object.create(null);
+        const appliedButtonStates = Object.create(null);
 
-            if (emulatorPtr && module) {
+        function setButtonState(btn, isPressed) {
+            const state = !!isPressed;
+            if (state) pressedButtons.add(btn);
+            else pressedButtons.delete(btn);
+            desiredButtonStates[btn] = state;
+
+            // Only desktop/pen/mouse gets JS visual feedback. On touch devices
+            // we leave painting entirely to the browser (and mobile CSS
+            // disables the expensive pressed styles).
+            if (USE_JS_VISUAL_FEEDBACK) {
+                const els = getButtonElements(btn);
+                els.forEach(el => el.classList.toggle('pressed', state));
+            }
+        }
+
+        function flushJoypadStates() {
+            if (!emulatorPtr || !module) return;
+
+            for (const btn of Object.keys(JOYPAD_EXPORT_NAMES)) {
+                const desired = !!desiredButtonStates[btn];
+                const applied = !!appliedButtonStates[btn];
+                if (desired === applied) continue;
+
                 let fn = joypadFns[btn];
-                // Safety fallback for any early input event before the normal
-                // emulator initialization path has refreshed the cache.
                 if (!fn) {
                     fn = getExport(JOYPAD_EXPORT_NAMES[btn]);
                     joypadFns[btn] = fn;
                 }
                 if (fn) {
                     try {
-                        fn(emulatorPtr, isPressed ? 1 : 0);
+                        fn(emulatorPtr, desired ? 1 : 0);
+                        appliedButtonStates[btn] = desired;
                     } catch (err) {
                         console.error('Error sending joypad input:', err);
                     }
                 }
-            }
-
-            // Desktop/pen/mouse: keep the JS pressed class for held-button
-            // feedback. Touch devices use native CSS :active instead, avoiding
-            // layout/style work for every rapid tap.
-            if (USE_JS_VISUAL_FEEDBACK) {
-                const els = getButtonElements(btn);
-                els.forEach(el => el.classList.toggle('pressed', isPressed));
-            }
-
-            if (ENABLE_HAPTIC_FEEDBACK && isPressed && navigator.vibrate) {
-                try { navigator.vibrate(10); } catch (_) {}
             }
         }
 
@@ -1298,21 +1326,16 @@
             actionPointerToButton.clear();
 
             for (const btn of all) {
-                if (emulatorPtr && module) {
-                    let fn = joypadFns[btn];
-                    if (!fn) {
-                        fn = getExport(JOYPAD_EXPORT_NAMES[btn]);
-                        joypadFns[btn] = fn;
-                    }
-                    if (fn) {
-                        try { fn(emulatorPtr, 0); } catch (_) {}
-                    }
-                }
+                desiredButtonStates[btn] = false;
+                appliedButtonStates[btn] = false;
 
                 if (USE_JS_VISUAL_FEEDBACK) {
                     getButtonElements(btn).forEach(el => el.classList.remove('pressed'));
                 }
             }
+
+            // Ensure the currently active emulator receives the reset state.
+            flushJoypadStates();
         }
 
         let inputSetupDone = false;
@@ -1462,7 +1485,6 @@
 
                 try { el.setPointerCapture(e.pointerId); } catch (_) {}
 
-                if (audio?.ctx?.state === 'suspended') audio.ctx.resume();
                 setButtonState(btn, true);
             }, { passive: false });
 
@@ -1667,6 +1689,8 @@
 
         function stepEmulator() {
             if (!module || !emulatorPtr) return;
+
+            flushJoypadStates();
 
             const runUntil = getExport('emulator_run_until_f64');
             const getTicks = getExport('emulator_get_ticks_f64');
