@@ -311,23 +311,39 @@
             color: #fbcfe8;
         }
 
-        /* Phones: avoid the expensive pressed-state paint on every touch. */
+        /* Phones: zero visual feedback on button presses.
+           Transitions + :active / .pressed style changes cause expensive
+           layout/paint on every rapid A/B tap and contend with the emulator. */
         @media (hover: none) and (pointer: coarse) {
+            .dpad-btn,
+            .btn-action,
+            .btn-pill {
+                transition: none !important;
+            }
             .dpad-btn:active,
             .dpad-btn.pressed,
             .btn-action:active,
             .btn-action.pressed,
             .btn-pill:active,
             .btn-pill.pressed {
-                background: inherit;
-                box-shadow: inherit;
-                transform: none;
+                background: inherit !important;
+                box-shadow: inherit !important;
+                transform: none !important;
+                color: inherit !important;
+                filter: none !important;
+                opacity: 1 !important;
             }
             .dpad-btn:active span,
             .dpad-btn.pressed span {
-                color: inherit;
-                transform: none;
-                text-shadow: inherit;
+                color: inherit !important;
+                transform: none !important;
+                text-shadow: inherit !important;
+            }
+            /* Keep A/B appearance identical while pressed */
+            .btn-action:active,
+            .btn-action.pressed {
+                background: var(--action-btn-bg) !important;
+                color: #fff1f2 !important;
             }
         }
 
@@ -731,17 +747,15 @@
                                     <button type="button" data-gb-btn="B" class="btn-action btn-b" aria-label="Button B">
                                         B
                                     </button>
-                                    <span class="text-[10px] font-black text-slate-400 italic tracking-wider mt-1 rotate-[25deg]">B</span>
                                 </div>
                                 <!-- Button A -->
                                 <div class="flex flex-col items-center">
                                     <button type="button" data-gb-btn="A" class="btn-action btn-a" aria-label="Button A">
                                         A
                                     </button>
-                                    <span class="text-[10px] font-black text-slate-400 italic tracking-wider mt-1 rotate-[25deg]">A</span>
                                 </div>
                             </div>
-                            <span class="text-[9px] font-bold text-slate-500 tracking-wider mt-1.5 uppercase font-mono">Action</span>
+                            <span class="text-[9px] font-bold text-slate-500 tracking-wider mt-1.5 rotate-[-25deg] uppercase font-mono">Action</span>
                         </div>
 
                     </div>
@@ -1237,19 +1251,22 @@
         // with the emulator on some mobile browsers.
         const ENABLE_HAPTIC_FEEDBACK = false;
 
-        // On phones, native CSS :active already provides the button-pressed
-        // appearance. Avoid classList/DOM work in the hot touch-input path;
-        // this keeps rapid A/B tapping from competing with the emulator loop.
-        const USE_JS_VISUAL_FEEDBACK = !(
+        // On phones, zero visual feedback (CSS + JS). Avoid classList / DOM work
+        // in the hot touch-input path so rapid A/B taps do not contend with
+        // the emulator loop.
+        const IS_COARSE_POINTER = !!(
             window.matchMedia &&
             window.matchMedia('(hover: none) and (pointer: coarse)').matches
         );
+        const USE_JS_VISUAL_FEEDBACK = !IS_COARSE_POINTER;
 
         // Action-button touch/pointer state is kept globally so resetAllButtons()
-        // can clear it. Delegated pointer listeners below also survive DOM
-        // replacement, which avoids the old reset/input-listener problem.
+        // can clear it. Delegated listeners survive DOM replacement during Reset.
         const actionPointerIds = new Map();
         const actionPointerToButton = new Map();
+        // Mobile touch-identifier tracking for A/B/Select/Start (mirrors D-pad).
+        const actionTouchIds = new Map(); // touchId -> btn
+        const actionBtnTouchCounts = Object.create(null); // btn -> active touch count
 
         function refreshButtonElementCache() {
             buttonElementCache.clear();
@@ -1281,13 +1298,14 @@
 
         function setButtonState(btn, isPressed) {
             const state = !!isPressed;
+            // Early-out: avoid Set / object writes when nothing changed.
+            if (desiredButtonStates[btn] === state) return;
+
             if (state) pressedButtons.add(btn);
             else pressedButtons.delete(btn);
             desiredButtonStates[btn] = state;
 
-            // Only desktop/pen/mouse gets JS visual feedback. On touch devices
-            // we leave painting entirely to the browser (and mobile CSS
-            // disables the expensive pressed styles).
+            // Desktop/pen/mouse only. Mobile CSS forces zero visual feedback.
             if (USE_JS_VISUAL_FEEDBACK) {
                 const els = getButtonElements(btn);
                 els.forEach(el => el.classList.toggle('pressed', state));
@@ -1324,6 +1342,10 @@
             pressedButtons.clear();
             actionPointerIds.clear();
             actionPointerToButton.clear();
+            actionTouchIds.clear();
+            for (const k of Object.keys(actionBtnTouchCounts)) {
+                actionBtnTouchCounts[k] = 0;
+            }
 
             for (const btn of all) {
                 desiredButtonStates[btn] = false;
@@ -1459,9 +1481,8 @@
             }
 
             // Action & Pill Buttons
-            // Delegated Pointer Events handle mouse + touch through one stable
-            // listener. Because the listener lives on document, replacing the
-            // emulator/UI during Reset does not make the controls stop working.
+            // Mobile (coarse pointer): pure TouchEvents — no setPointerCapture,
+            // no closest() on every move, no classList. Desktop: PointerEvents.
             const isActionButton = (target) => {
                 const el = target instanceof Element
                     ? target.closest('[data-gb-btn]:not(.dpad-btn)')
@@ -1469,46 +1490,86 @@
                 return el || null;
             };
 
-            document.addEventListener('pointerdown', (e) => {
-                const el = isActionButton(e.target);
-                if (!el) return;
-
-                e.preventDefault();
-                e.stopPropagation();
-
-                const btn = el.getAttribute('data-gb-btn');
-                if (!btn) return;
-
-                if (!actionPointerIds.has(btn)) actionPointerIds.set(btn, new Set());
-                actionPointerIds.get(btn).add(e.pointerId);
-                actionPointerToButton.set(e.pointerId, btn);
-
-                try { el.setPointerCapture(e.pointerId); } catch (_) {}
-
-                setButtonState(btn, true);
-            }, { passive: false });
-
-            const releaseActionPointer = (e) => {
-                // Release using pointerId rather than event.target. This keeps
-                // the button state correct even if the pointer leaves the button
-                // or the browser retargets the event.
-                const btn = actionPointerToButton.get(e.pointerId);
-                if (!btn) return;
-
-                actionPointerToButton.delete(e.pointerId);
-
-                const ids = actionPointerIds.get(btn);
-                if (ids) {
-                    ids.delete(e.pointerId);
-                    if (ids.size === 0) {
-                        actionPointerIds.delete(btn);
-                        setButtonState(btn, false);
+            if (IS_COARSE_POINTER) {
+                // ---- MOBILE: TouchEvent path (cheapest for rapid A/B spam) ----
+                document.addEventListener('touchstart', (e) => {
+                    let handled = false;
+                    for (let i = 0; i < e.changedTouches.length; i++) {
+                        const t = e.changedTouches[i];
+                        const el = isActionButton(t.target);
+                        if (!el) continue;
+                        const btn = el.getAttribute('data-gb-btn');
+                        if (!btn) continue;
+                        handled = true;
+                        actionTouchIds.set(t.identifier, btn);
+                        actionBtnTouchCounts[btn] = (actionBtnTouchCounts[btn] || 0) + 1;
+                        if (actionBtnTouchCounts[btn] === 1) {
+                            setButtonState(btn, true);
+                        }
                     }
-                }
-            };
+                    if (handled) {
+                        e.preventDefault();
+                        if (audio?.ctx?.state === 'suspended') audio.ctx.resume();
+                    }
+                }, { passive: false });
 
-            document.addEventListener('pointerup', releaseActionPointer, { passive: false });
-            document.addEventListener('pointercancel', releaseActionPointer, { passive: false });
+                const endActionTouch = (e) => {
+                    for (let i = 0; i < e.changedTouches.length; i++) {
+                        const t = e.changedTouches[i];
+                        const btn = actionTouchIds.get(t.identifier);
+                        if (!btn) continue;
+                        actionTouchIds.delete(t.identifier);
+                        const count = (actionBtnTouchCounts[btn] || 1) - 1;
+                        actionBtnTouchCounts[btn] = count;
+                        if (count <= 0) {
+                            actionBtnTouchCounts[btn] = 0;
+                            setButtonState(btn, false);
+                        }
+                    }
+                };
+
+                document.addEventListener('touchend', endActionTouch, { passive: true });
+                document.addEventListener('touchcancel', endActionTouch, { passive: true });
+            } else {
+                // ---- DESKTOP / PEN: PointerEvents ----
+                document.addEventListener('pointerdown', (e) => {
+                    if (e.pointerType === 'touch') return; // handled above if coarse
+                    const el = isActionButton(e.target);
+                    if (!el) return;
+
+                    e.preventDefault();
+
+                    const btn = el.getAttribute('data-gb-btn');
+                    if (!btn) return;
+
+                    if (!actionPointerIds.has(btn)) actionPointerIds.set(btn, new Set());
+                    actionPointerIds.get(btn).add(e.pointerId);
+                    actionPointerToButton.set(e.pointerId, btn);
+
+                    try { el.setPointerCapture(e.pointerId); } catch (_) {}
+
+                    setButtonState(btn, true);
+                }, { passive: false });
+
+                const releaseActionPointer = (e) => {
+                    const btn = actionPointerToButton.get(e.pointerId);
+                    if (!btn) return;
+
+                    actionPointerToButton.delete(e.pointerId);
+
+                    const ids = actionPointerIds.get(btn);
+                    if (ids) {
+                        ids.delete(e.pointerId);
+                        if (ids.size === 0) {
+                            actionPointerIds.delete(btn);
+                            setButtonState(btn, false);
+                        }
+                    }
+                };
+
+                document.addEventListener('pointerup', releaseActionPointer, { passive: true });
+                document.addEventListener('pointercancel', releaseActionPointer, { passive: true });
+            }
 
             // ========================================================
             // KEYBOARD CONTROLS (DESKTOP)
