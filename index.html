@@ -1210,16 +1210,16 @@
             }
 
             // Visual feedback on all matching on-screen buttons
-            const els = document.querySelectorAll(`[data-gb-btn="${btn}"]`);
-            els.forEach(el => {
-                if (isPressed) el.classList.add('pressed');
-                else el.classList.remove('pressed');
-            });
+            // const els = document.querySelectorAll(`[data-gb-btn="${btn}"]`);
+            // els.forEach(el => {
+            //     if (isPressed) el.classList.add('pressed');
+            //     else el.classList.remove('pressed');
+            // });
 
             // Haptic vibration on phones (if supported)
-            if (isPressed && navigator.vibrate) {
-                try { navigator.vibrate(10); } catch (_) {}
-            }
+            // if (isPressed && navigator.vibrate) {
+            //     try { navigator.vibrate(10); } catch (_) {}
+            // }
         }
 
         function resetAllButtons() {
