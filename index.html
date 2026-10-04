@@ -647,7 +647,32 @@
                 </div>
             </div>
 
+            <!-- System Logs -->
+            <div id="panel-logs-col" class="bg-slate-900/90 p-4 rounded-2xl border border-slate-800 shadow-lg flex flex-col overflow-hidden max-h-[300px]">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider font-mono">
+                        System Log
+                    </h3>
+                    <button
+                        id="btn-copy-logs"
+                        type="button"
+                        class="bg-slate-800 hover:bg-slate-700 active:scale-95 text-sky-400 hover:text-sky-300 text-[10px] font-mono font-bold px-2 py-0.5 rounded-lg border border-slate-700 transition flex items-center gap-1 cursor-pointer"
+                        title="Copy entire logs content to clipboard"
+                    >
+                        <span>📋</span> <span id="copy-logs-text">COPY LOGS</span>
+                    </button>
+                </div>
+
+                <div
+                    id="system-logs"
+                    class="overflow-y-auto flex-1 font-mono text-slate-300 hide-scroll text-[11px] pr-1"
+                >
+                    <div class="log-line text-slate-400">
+                        Ready to load files...
+                    </div>
+                </div>
             </div>
+        </div>
 
         <!-- CENTER COLUMN: HANDHELD GAME BOY CONSOLE -->
         <div class="lg:col-span-6 lg:order-2 order-1 flex flex-col items-center w-full">
@@ -803,6 +828,9 @@
                 <button type="button" class="mobile-tab-btn flex-1 py-2 text-[11px] font-bold rounded-xl text-slate-400 hover:text-white transition cursor-pointer" data-tab="chat">
                     💬 Chat & Sync
                 </button>
+                <button type="button" class="mobile-tab-btn flex-1 py-2 text-[11px] font-bold rounded-xl text-slate-400 hover:text-white transition cursor-pointer" data-tab="logs">
+                    📋 Logs
+                </button>
             </div>
         </div>
 
@@ -811,22 +839,33 @@
 
             <div class="bg-slate-900/90 p-4 rounded-2xl border border-slate-800 shadow-lg">
                 <h3 class="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider font-mono">
-                    Link Status
+                    RAM Sync Status
                 </h3>
 
-                <div class="flex items-center justify-between gap-3 bg-slate-950 p-2.5 rounded-xl mb-1.5 border border-slate-800/80">
-                    <span class="text-[10px] text-slate-400 font-mono tracking-wide">YOU</span>
-                    <span id="p1-flag" class="w-3 h-3 rounded-full bg-slate-700 transition-all" title="Ready"></span>
+                <div class="flex justify-between items-center bg-slate-950 p-2 rounded-xl mb-1.5 border border-slate-800/80">
+                    <span class="text-[10px] text-slate-400 font-mono">P1_READY ($C5FD)</span>
+                    <div class="flex items-center gap-2">
+                        <span id="p1-val" class="text-[10px] font-bold text-slate-300 font-mono">0</span>
+                        <span id="p1-flag" class="w-2.5 h-2.5 rounded-full bg-slate-700"></span>
+                    </div>
                 </div>
 
-                <div class="flex items-center justify-between gap-3 bg-slate-950 p-2.5 rounded-xl mb-1.5 border border-slate-800/80">
-                    <span class="text-[10px] text-slate-400 font-mono tracking-wide">OPPONENT</span>
-                    <span id="p2-flag" class="w-3 h-3 rounded-full bg-slate-700 transition-all" title="Ready"></span>
+                <div class="flex justify-between items-center bg-slate-950 p-2 rounded-xl mb-1.5 border border-slate-800/80">
+                    <span class="text-[10px] text-slate-400 font-mono">P2_READY ($C5FE)</span>
+                    <div class="flex items-center gap-2">
+                        <span id="p2-val" class="text-[10px] font-bold text-slate-300 font-mono">0</span>
+                        <span id="p2-flag" class="w-2.5 h-2.5 rounded-full bg-slate-700"></span>
+                    </div>
                 </div>
 
-                <div class="flex justify-between items-center bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
-                    <span class="text-[10px] text-slate-400 font-mono">NAME</span>
-                    <span id="opp-name-tag" class="text-[10px] text-sky-400 font-bold truncate max-w-[140px] font-mono">
+                <div class="flex justify-between items-center bg-slate-950 p-2 rounded-xl mb-1.5 border border-slate-800/80">
+                    <span class="text-[10px] text-slate-400 font-mono">FIFO QUEUE</span>
+                    <span id="fifo-depth" class="text-[10px] text-sky-400 font-bold font-mono">0 pkts</span>
+                </div>
+
+                <div class="flex justify-between items-center bg-slate-950 p-2 rounded-xl border border-slate-800/80">
+                    <span class="text-[10px] text-slate-400 font-mono">OPPONENT</span>
+                    <span id="opp-name-tag" class="text-[10px] text-sky-400 font-bold truncate max-w-[120px] font-mono">
                         NONE
                     </span>
                 </div>
@@ -859,8 +898,56 @@
     <script>
         const $ = (id) => document.getElementById(id);
 
-        // Release build: logging disabled (no-op keeps call sites safe).
-        const log = (_msg) => {};
+        const logHistory = ["[Ready to load files...]"];
+
+        const log = (msg) => {
+            const timeStr = new Date().toLocaleTimeString();
+            const formatted = `[${timeStr}] ${msg}`;
+            logHistory.push(formatted);
+            const div = document.createElement('div');
+            div.className = 'log-line';
+            div.innerText = formatted;
+            const container = $('system-logs');
+            if (container) {
+                container.appendChild(div);
+                container.scrollTop = container.scrollHeight;
+            }
+        };
+
+        const copyLogsToClipboard = async () => {
+            const logsEl = $('system-logs');
+            const textToCopy = logHistory.length > 0 
+                ? logHistory.join('\n') 
+                : (logsEl ? Array.from(logsEl.querySelectorAll('.log-line')).map(l => l.innerText.trim()).join('\n') : '');
+
+            if (!textToCopy) return;
+
+            try {
+                await navigator.clipboard.writeText(textToCopy);
+            } catch (_) {
+                const ta = document.createElement('textarea');
+                ta.value = textToCopy;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.focus();
+                ta.select();
+                try { document.execCommand('copy'); } catch (_) {}
+                document.body.removeChild(ta);
+            }
+
+            const btnText = $('copy-logs-text');
+            if (btnText) {
+                const orig = btnText.innerText;
+                btnText.innerText = 'COPIED!';
+                setTimeout(() => { btnText.innerText = orig; }, 1500);
+            }
+        };
+
+        const btnCopyLogs = $('btn-copy-logs');
+        if (btnCopyLogs) {
+            btnCopyLogs.onclick = copyLogsToClipboard;
+        }
 
         // ============================================================
         // RAM OFFSETS (Base address = $C000)
@@ -1133,7 +1220,10 @@
             }
             disableSmoothing(_displayCtx);
 
+            if (typeof log === 'function') {
+                log(`[SCALE] ×${deviceScale} device px/src → buffer ${bufW}×${bufH}, CSS ${cssW.toFixed(1)}×${cssH.toFixed(1)}, dpr=${dpr}`);
             }
+        }
 
         function blitFrame(frameData) {
             const { canvas: src, ctx: srcCtx } = getFrameSrc();
@@ -1693,6 +1783,10 @@
                             if (filesCol) filesCol.style.display = 'none';
                             if (chatCol) chatCol.style.display = 'flex';
                             chatCol?.scrollIntoView({ behavior: 'smooth' });
+                        } else if (tab === 'logs') {
+                            if (filesCol) filesCol.style.display = 'flex';
+                            if (chatCol) chatCol.style.display = 'none';
+                            $('system-logs')?.scrollIntoView({ behavior: 'smooth' });
                         }
                     }
                 };
@@ -1710,7 +1804,7 @@
                     if (activeTab === 'game') {
                         if (filesCol) filesCol.style.display = 'none';
                         if (chatCol) chatCol.style.display = 'none';
-                    } else if (activeTab === 'files') {
+                    } else if (activeTab === 'files' || activeTab === 'logs') {
                         if (filesCol) filesCol.style.display = 'flex';
                         if (chatCol) chatCol.style.display = 'none';
                     } else if (activeTab === 'chat') {
@@ -1847,6 +1941,7 @@
 
             lastTickTime = performance.now();
             animationFrameReq = requestAnimationFrame(tick);
+            updateDebugOverlay();
         }
 
         // Background watchdog: If requestAnimationFrame pauses (e.g. taking screenshot,
@@ -1868,14 +1963,10 @@
             const p1 = wram[OFFSET_P1_READY];
             const p2 = wram[OFFSET_P2_READY];
 
-            const p1Flag = $('p1-flag');
-            const p2Flag = $('p2-flag');
-            if (p1Flag) {
-                p1Flag.className = `w-3 h-3 rounded-full transition-all ${p1 > 0 ? 'bg-green-500 shadow-[0_0_8px_#22c55e]' : 'bg-slate-700'}`;
-            }
-            if (p2Flag) {
-                p2Flag.className = `w-3 h-3 rounded-full transition-all ${p2 > 0 ? 'bg-green-500 shadow-[0_0_8px_#22c55e]' : 'bg-slate-700'}`;
-            }
+            $('p1-val').innerText = p1;
+            $('p2-val').innerText = p2;
+            $('p1-flag').className = `w-3 h-3 rounded-full ${p1 > 0 ? 'bg-green-500 shadow-[0_0_8px_#22c55e]' : 'bg-slate-700'}`;
+            $('p2-flag').className = `w-3 h-3 rounded-full ${p2 > 0 ? 'bg-green-500 shadow-[0_0_8px_#22c55e]' : 'bg-slate-700'}`;
 
             // P1_READY changed: broadcast the new step to the opponent
             if (p1 !== lastP1State) {
@@ -1968,6 +2059,8 @@
         function processIncomingSerialQueue() {
             const wram = getWram();
             if (!wram) return;
+
+            $('fifo-depth').innerText = `${incomingSerialQueue.length} pkts`;
 
             if (incomingSerialQueue.length === 0) return;
 
@@ -2290,14 +2383,71 @@
             port: 443,
             path: PEERJS_PATH,
             secure: true,
-            debug: 0,
+            debug: 3,
             config: {
                 iceTransportPolicy: 'all',
                 iceServers: [
-                //removed for privacy, the servers are working
+                    {
+                        urls: "stun:stun.relay.metered.ca:80",
+                    },
+                    {
+                        urls: "turn:global.relay.metered.ca:80",
+                        username: "3bbc2d5b0a81c730368afa0f",
+                        credential: "wr4vKueM5c7mGY94",
+                    },
+                    {
+                        urls: "turn:global.relay.metered.ca:80?transport=tcp",
+                        username: "3bbc2d5b0a81c730368afa0f",
+                        credential: "wr4vKueM5c7mGY94",
+                    },
+                    {
+                        urls: "turn:global.relay.metered.ca:443",
+                        username: "3bbc2d5b0a81c730368afa0f",
+                        credential: "wr4vKueM5c7mGY94",
+                    },
+                    {
+                        urls: "turns:global.relay.metered.ca:443?transport=tcp",
+                        username: "3bbc2d5b0a81c730368afa0f",
+                        credential: "wr4vKueM5c7mGY94",
+                    },
                 ],
             }
         };
+
+        function updateDebugOverlay() {
+            // Remove / hide debug overlay in phone mode (< 1024px)
+            if (window.innerWidth < 1024) {
+                const el = $('debug-overlay');
+                if (el) el.remove();
+                return;
+            }
+
+            const wram = getWram();
+            if (!wram) return;
+
+            let debugEl = $('debug-overlay');
+            if (!debugEl) {
+                debugEl = document.createElement('div');
+                debugEl.id = 'debug-overlay';
+                debugEl.className = 'fixed bottom-4 right-4 bg-black/80 text-green-400 font-mono text-[10px] p-3 rounded border border-slate-700 pointer-events-none z-50 space-y-1';
+                document.body.appendChild(debugEl);
+            }
+
+            const whoseTurn = wram[OFFSET_WHOSE_TURN];
+            const whoseTurnStr = whoseTurn === 0xC2 ? 'PLAYER' : (whoseTurn === 0xC3 ? 'OPPONENT' : '0x' + whoseTurn.toString(16));
+            debugEl.innerHTML = `
+                <div>wSerialOp  : 0x${wram[OFFSET_SERIAL_OP].toString(16).padStart(2, '0')}</div>
+                <div>wWhoseTurn : 0x${whoseTurn.toString(16).padStart(2, '0')} (${whoseTurnStr})</div>
+                <div>RNG        : [${wram[OFFSET_RNG]}, ${wram[OFFSET_RNG + 1]}, ${wram[OFFSET_RNG + 2]}]</div>
+                <div>P1_READY   : ${wram[OFFSET_P1_READY]}</div>
+                <div>P2_READY   : ${wram[OFFSET_P2_READY]}</div>
+                <div>SEND_QUEUE : ${wram[OFFSET_SERIAL_SEND_TOGGLE]} bytes</div>
+                <div>RECV_QUEUE : ${wram[OFFSET_SERIAL_RECV_COUNT]} bytes</div>
+                <div>FIFO_DEPTH : ${incomingSerialQueue.length} pkts</div>
+                <div>SEND_STATE : ${wram[OFFSET_SERIAL_SEND_STATE]}</div>
+                <div>RECV_STATE : ${wram[OFFSET_SERIAL_RECV_STATE]}</div>
+            `;
+        }
 
         function createHost() {
             if (peer) { log('Already have a PeerJS session.'); return; }
