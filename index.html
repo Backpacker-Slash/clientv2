@@ -1113,6 +1113,15 @@
         // ============================================================
         async function initEmulator(romBuffer, savBuffer = null) {
             if (animationFrameReq) cancelAnimationFrame(animationFrameReq);
+
+            // Reset/reload may create a new emulator and AudioContext. Close the
+            // previous context so repeated resets do not leave old audio engines
+            // running in the background.
+            if (audio?.ctx) {
+                try { await audio.ctx.close(); } catch (_) {}
+            }
+            audio = null;
+
             log("Booting WASM...");
 
             module = await Binjgb();
@@ -1154,6 +1163,8 @@
             if (jNew && jSet) {
                 joypadPtr = jNew();
                 jSet(emulatorPtr, joypadPtr);
+                refreshJoypadFns();
+                refreshButtonElementCache();
                 setupInput();
             }
 
@@ -1191,53 +1202,103 @@
 
         const pressedButtons = new Set();
 
+        // Cache WASM joypad exports. These are refreshed every time the emulator
+        // is (re)initialized, so the Reset button gets functions belonging to
+        // the new WASM module instead of stale exports.
+        const joypadFns = Object.create(null);
+
+        // Cache the DOM button elements. querySelectorAll() is only used when
+        // the cache is first built or when the UI has actually been replaced.
+        // This keeps rapid A/B presses cheap on phones.
+        const buttonElementCache = new Map();
+
+        // Touch haptics are intentionally disabled by default. Calling
+        // navigator.vibrate() on every rapid A/B press can noticeably contend
+        // with the emulator on some mobile browsers.
+        const ENABLE_HAPTIC_FEEDBACK = false;
+
+        // Action-button touch/pointer state is kept globally so resetAllButtons()
+        // can clear it. Delegated pointer listeners below also survive DOM
+        // replacement, which avoids the old reset/input-listener problem.
+        const actionPointerIds = new Map();
+        const actionPointerToButton = new Map();
+
+        function refreshButtonElementCache() {
+            buttonElementCache.clear();
+            document.querySelectorAll('[data-gb-btn]').forEach(el => {
+                const btn = el.getAttribute('data-gb-btn');
+                if (!btn) return;
+                if (!buttonElementCache.has(btn)) buttonElementCache.set(btn, []);
+                buttonElementCache.get(btn).push(el);
+            });
+        }
+
+        function getButtonElements(btn) {
+            let els = buttonElementCache.get(btn);
+            if (!els || els.length === 0 || els.some(el => !el.isConnected)) {
+                refreshButtonElementCache();
+                els = buttonElementCache.get(btn) || [];
+            }
+            return els;
+        }
+
+        function refreshJoypadFns() {
+            for (const btn of Object.keys(JOYPAD_EXPORT_NAMES)) {
+                joypadFns[btn] = getExport(JOYPAD_EXPORT_NAMES[btn]);
+            }
+        }
+
         function setButtonState(btn, isPressed) {
             if (isPressed) pressedButtons.add(btn);
             else pressedButtons.delete(btn);
 
             if (emulatorPtr && module) {
-                const exportName = JOYPAD_EXPORT_NAMES[btn];
-                if (exportName) {
-                    const fn = getExport(exportName);
-                    if (fn) {
-                        try {
-                            fn(emulatorPtr, isPressed ? 1 : 0);
-                        } catch (err) {
-                            console.error('Error sending joypad input:', err);
-                        }
+                let fn = joypadFns[btn];
+                // Safety fallback for any early input event before the normal
+                // emulator initialization path has refreshed the cache.
+                if (!fn) {
+                    fn = getExport(JOYPAD_EXPORT_NAMES[btn]);
+                    joypadFns[btn] = fn;
+                }
+                if (fn) {
+                    try {
+                        fn(emulatorPtr, isPressed ? 1 : 0);
+                    } catch (err) {
+                        console.error('Error sending joypad input:', err);
                     }
                 }
             }
 
-            // Visual feedback on all matching on-screen buttons
-            // const els = document.querySelectorAll(`[data-gb-btn="${btn}"]`);
-            // els.forEach(el => {
-            //     if (isPressed) el.classList.add('pressed');
-            //     else el.classList.remove('pressed');
-            // });
+            // Cheap cached visual feedback. No DOM query on every input event.
+            const els = getButtonElements(btn);
+            els.forEach(el => el.classList.toggle('pressed', isPressed));
 
-            // Haptic vibration on phones (if supported)
-            // if (isPressed && navigator.vibrate) {
-            //     try { navigator.vibrate(10); } catch (_) {}
-            // }
+            if (ENABLE_HAPTIC_FEEDBACK && isPressed && navigator.vibrate) {
+                try { navigator.vibrate(10); } catch (_) {}
+            }
         }
 
         function resetAllButtons() {
             const all = ['up', 'down', 'left', 'right', 'A', 'B', 'start', 'select'];
-            all.forEach(btn => {
-                pressedButtons.delete(btn);
+
+            pressedButtons.clear();
+            actionPointerIds.clear();
+            actionPointerToButton.clear();
+
+            for (const btn of all) {
                 if (emulatorPtr && module) {
-                    const exportName = JOYPAD_EXPORT_NAMES[btn];
-                    if (exportName) {
-                        const fn = getExport(exportName);
-                        if (fn) {
-                            try { fn(emulatorPtr, 0); } catch (_) {}
-                        }
+                    let fn = joypadFns[btn];
+                    if (!fn) {
+                        fn = getExport(JOYPAD_EXPORT_NAMES[btn]);
+                        joypadFns[btn] = fn;
+                    }
+                    if (fn) {
+                        try { fn(emulatorPtr, 0); } catch (_) {}
                     }
                 }
-                const els = document.querySelectorAll(`[data-gb-btn="${btn}"]`);
-                els.forEach(el => el.classList.remove('pressed'));
-            });
+
+                getButtonElements(btn).forEach(el => el.classList.remove('pressed'));
+            }
         }
 
         let inputSetupDone = false;
@@ -1360,49 +1421,58 @@
                 dpadCross.addEventListener('pointercancel', clearPointerDpad);
             }
 
-            // Action & Pill Buttons Touch Listeners (A, B, Select, Start)
-            // Each button tracks active touch identifiers so multiple buttons can be held at once!
-            const touchButtons = document.querySelectorAll('[data-gb-btn]:not(.dpad-btn)');
-            touchButtons.forEach(el => {
+            // Action & Pill Buttons
+            // Delegated Pointer Events handle mouse + touch through one stable
+            // listener. Because the listener lives on document, replacing the
+            // emulator/UI during Reset does not make the controls stop working.
+            const isActionButton = (target) => {
+                const el = target instanceof Element
+                    ? target.closest('[data-gb-btn]:not(.dpad-btn)')
+                    : null;
+                return el || null;
+            };
+
+            document.addEventListener('pointerdown', (e) => {
+                const el = isActionButton(e.target);
+                if (!el) return;
+
+                e.preventDefault();
+                e.stopPropagation();
+
                 const btn = el.getAttribute('data-gb-btn');
-                const activeBtnTouchIds = new Set();
+                if (!btn) return;
 
-                el.addEventListener('touchstart', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (audio?.ctx?.state === 'suspended') audio.ctx.resume();
-                    for (let i = 0; i < e.changedTouches.length; i++) {
-                        activeBtnTouchIds.add(e.changedTouches[i].identifier);
-                    }
-                    setButtonState(btn, true);
-                }, { passive: false });
+                if (!actionPointerIds.has(btn)) actionPointerIds.set(btn, new Set());
+                actionPointerIds.get(btn).add(e.pointerId);
+                actionPointerToButton.set(e.pointerId, btn);
 
-                const handleEnd = (e) => {
-                    for (let i = 0; i < e.changedTouches.length; i++) {
-                        activeBtnTouchIds.delete(e.changedTouches[i].identifier);
-                    }
-                    if (activeBtnTouchIds.size === 0) {
+                try { el.setPointerCapture(e.pointerId); } catch (_) {}
+
+                if (audio?.ctx?.state === 'suspended') audio.ctx.resume();
+                setButtonState(btn, true);
+            }, { passive: false });
+
+            const releaseActionPointer = (e) => {
+                // Release using pointerId rather than event.target. This keeps
+                // the button state correct even if the pointer leaves the button
+                // or the browser retargets the event.
+                const btn = actionPointerToButton.get(e.pointerId);
+                if (!btn) return;
+
+                actionPointerToButton.delete(e.pointerId);
+
+                const ids = actionPointerIds.get(btn);
+                if (ids) {
+                    ids.delete(e.pointerId);
+                    if (ids.size === 0) {
+                        actionPointerIds.delete(btn);
                         setButtonState(btn, false);
                     }
-                };
+                }
+            };
 
-                el.addEventListener('touchend', handleEnd, { passive: false });
-                el.addEventListener('touchcancel', handleEnd, { passive: false });
-
-                // Desktop Mouse fallback
-                el.addEventListener('mousedown', (e) => {
-                    e.preventDefault();
-                    setButtonState(btn, true);
-                    if (audio?.ctx?.state === 'suspended') audio.ctx.resume();
-                });
-                el.addEventListener('mouseup', (e) => {
-                    e.preventDefault();
-                    setButtonState(btn, false);
-                });
-                el.addEventListener('mouseleave', (e) => {
-                    setButtonState(btn, false);
-                });
-            });
+            document.addEventListener('pointerup', releaseActionPointer, { passive: false });
+            document.addEventListener('pointercancel', releaseActionPointer, { passive: false });
 
             // ========================================================
             // KEYBOARD CONTROLS (DESKTOP)
@@ -1856,7 +1926,9 @@
             return copy;
         }
 
-        // Auto-save SRAM periodically every 5 seconds if running
+        // Auto-save SRAM periodically every 5 seconds if running.
+        // IndexedDB is asynchronous, so this does not perform a synchronous
+        // localStorage write on every interval.
         setInterval(async () => {
             if (emulatorPtr) {
                 const sram = getEmulatorSramData();
