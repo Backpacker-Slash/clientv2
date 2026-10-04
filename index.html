@@ -320,6 +320,8 @@
         const OFFSET_PLAYER_NAME = 0x1D52;       // $DD52 (wPlayerName_)
         const OFFSET_OPPONENT_NAME = 0x1D62;     // $DD62 (wOpponentName_)
         const OFFSET_OPPONENT_AVATAR = 0x1D51;   // $DD51 (wLinkOpponentAvatar)
+        const OFFSET_PLAY_TIME_ENABLE = 0x0AC4;  // $CAC4 (wPlayTimeCounterEnable)
+        const OFFSET_PLAY_TIME_COUNTER = 0x0AC5; // $CAC5 (wPlayTimeCounter, 5 bytes: ticks, sec, min, hrLow, hrHigh)
 
         const NAME_BUFFER_LENGTH = 0x10;
         const DECK_SIZE = 0x80;
@@ -405,11 +407,16 @@
             }
 
             push() {
-                if (!this.ctx || this.ctx.state === 'suspended') return;
+                if (!this.ctx) return;
+                if (this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                    return;
+                }
                 const nowSec = this.ctx.currentTime;
-                const latency = 0.1;
-                this.startSec = this.startSec || (nowSec + latency);
-                if (this.startSec < nowSec) this.startSec = nowSec + latency;
+                const latency = 0.08;
+                if (!this.startSec || this.startSec < nowSec || this.startSec > nowSec + 0.25) {
+                    this.startSec = nowSec + latency;
+                }
 
                 const frames = 4096;
                 const buffer = this.ctx.createBuffer(2, frames, this.ctx.sampleRate);
@@ -424,6 +431,9 @@
                 const source = this.ctx.createBufferSource();
                 source.buffer = buffer;
                 source.connect(this.ctx.destination);
+                source.onended = () => {
+                    try { source.disconnect(); } catch (_) {}
+                };
                 source.start(this.startSec);
                 this.startSec += frames / this.ctx.sampleRate;
             }
@@ -586,6 +596,40 @@
         // MAIN EMULATION LOOP & BACKGROUND HEARTBEAT
         // ============================================================
         let lastTickTime = performance.now();
+        let lastPlayTimeTick = 0;
+
+        function updatePlayTimeClock() {
+            const wram = getWram();
+            if (!wram) return;
+
+            // Keep ROM's timer enable flag active ($CAC4)
+            wram[OFFSET_PLAY_TIME_ENABLE] = 1;
+
+            const now = performance.now();
+            if (lastPlayTimeTick === 0) {
+                lastPlayTimeTick = now;
+                return;
+            }
+
+            const elapsedMs = now - lastPlayTimeTick;
+            if (elapsedMs < 1000) return;
+
+            const elapsedSeconds = Math.floor(elapsedMs / 1000);
+            lastPlayTimeTick += elapsedSeconds * 1000;
+
+            let sec = wram[OFFSET_PLAY_TIME_COUNTER + 1] + elapsedSeconds;
+            let min = wram[OFFSET_PLAY_TIME_COUNTER + 2] + Math.floor(sec / 60);
+            sec = sec % 60;
+
+            let hr = (wram[OFFSET_PLAY_TIME_COUNTER + 3] | (wram[OFFSET_PLAY_TIME_COUNTER + 4] << 8)) + Math.floor(min / 60);
+            min = min % 60;
+            if (hr > 65535) hr = 65535;
+
+            wram[OFFSET_PLAY_TIME_COUNTER + 1] = sec;
+            wram[OFFSET_PLAY_TIME_COUNTER + 2] = min;
+            wram[OFFSET_PLAY_TIME_COUNTER + 3] = hr & 0xFF;
+            wram[OFFSET_PLAY_TIME_COUNTER + 4] = (hr >> 8) & 0xFF;
+        }
 
         function stepEmulator() {
             if (!module || !emulatorPtr) return;
@@ -600,6 +644,7 @@
                 if (res & 4) break;
             }
 
+            updatePlayTimeClock();
             syncRamLogic();
             handleSerialSendQueue();
             processIncomingSerialQueue();
