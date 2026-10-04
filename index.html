@@ -152,6 +152,28 @@
             max-width: 100%;
             margin-left: auto;
             margin-right: auto;
+            padding: 0.75rem;
+        }
+
+        /* Phones: minimal padding so integer scale 2+ can use almost full width.
+           (360 CSS-wide phone → 320px screen at ×2, not stuck at ×1 from padding.) */
+        @media (max-width: 1023px) {
+            #gb-chassis {
+                padding: 0.4rem !important;
+                width: 100%;
+                max-width: 100%;
+                box-sizing: border-box;
+            }
+            .gb-screen-bezel {
+                padding: 0.4rem !important;
+                width: 100%;
+                max-width: 100%;
+                box-sizing: border-box;
+            }
+            #gb-screen-wrap {
+                /* JS still sets exact pixel size; this just allows centering */
+                max-width: 100%;
+            }
         }
 
         /* Power LED with silver ring */
@@ -471,7 +493,7 @@
     </style>
 </head>
 
-<body class="p-2 sm:p-4 flex flex-col items-center min-h-[100dvh]">
+<body class="px-1 py-2 sm:p-4 flex flex-col items-center min-h-[100dvh]">
 
     <!-- TOP HEADER & CONNECTION BAR -->
     <header class="w-full max-w-6xl flex flex-wrap justify-between items-center gap-2.5 sm:gap-4 mb-3 sm:mb-4 bg-slate-900/90 p-2.5 sm:p-4 rounded-2xl border border-slate-800 shadow-xl backdrop-blur">
@@ -654,10 +676,10 @@
 
         <!-- CENTER COLUMN: HANDHELD GAME BOY CONSOLE -->
         <div class="lg:col-span-6 lg:order-2 order-1 flex flex-col items-center w-full">
-            <div id="gb-chassis" class="gb-chassis p-3 sm:p-4 relative select-none">
+            <div id="gb-chassis" class="gb-chassis relative select-none">
                 
                 <!-- Game Boy Screen Bezel -->
-                <div class="gb-screen-bezel p-3 sm:p-4 relative flex flex-col items-center">
+                <div class="gb-screen-bezel relative flex flex-col items-center" style="padding: 0.6rem;">
                     
                     <!-- Top bezel accents: Power LED & Stereo indicator -->
                     <div class="w-full flex items-center justify-between text-[10px] text-zinc-500 font-sans font-bold px-1 mb-2">
@@ -1108,14 +1130,19 @@
         }
 
         // ============================================================
-        // INTEGER PIXEL SCALE (DPR-aware, no fractional physical pixels)
+        // INTEGER PIXEL SCALE — max size, uniform pixels
         // ============================================================
-        // Desktop fractional devicePixelRatio (1.25, 1.5, …) is why CSS-only
-        // integer scale still looks uneven: 2 CSS px × 1.25 DPR = 2.5 device
-        // pixels per source pixel. We instead scale in *device* pixels and
-        // blit with imageSmoothingEnabled = false.
-        let _lastDeviceScale = 0;
-        let _frameSrcCanvas = null; // 160×144 staging canvas for putImageData
+        // Strategy:
+        //  • Pick the largest integer CSS scale (×1, ×2, ×3…) that fits.
+        //  • Canvas backing store == CSS size (1:1). Upscale 160×144 with
+        //    nearest-neighbor in software via drawImage + imageSmoothing off.
+        //  • Never use width:100% (that causes 2px/3px uneven rows).
+        //
+        // Note on phones: CSS width is NOT physical pixels. A 720×1280 phone
+        // at DPR 2 has window.innerWidth ≈ 360. Max scale is floor(360/160)=2
+        // → 320 CSS px = 640 physical px (not ×4 — ×4 would need 640 CSS px).
+        let _lastCssScale = 0;
+        let _frameSrcCanvas = null;
         let _frameSrcCtx = null;
         let _displayCtx = null;
 
@@ -1129,78 +1156,95 @@
             return { canvas: _frameSrcCanvas, ctx: _frameSrcCtx };
         }
 
+        function disableSmoothing(ctx) {
+            if (!ctx) return;
+            ctx.imageSmoothingEnabled = false;
+            ctx.mozImageSmoothingEnabled = false;
+            ctx.webkitImageSmoothingEnabled = false;
+            ctx.msImageSmoothingEnabled = false;
+        }
+
         function fitCanvasIntegerScale() {
             const canvas = $('gb-canvas');
             const wrap = $('gb-screen-wrap');
             if (!canvas || !wrap) return;
 
-            const dpr = window.devicePixelRatio || 1;
-
-            // Available CSS space: use the center column / viewport, not the wrap
-            // (wrap is sized TO the canvas — measuring it would lock the scale).
-            const chassis = $('gb-chassis');
-            const centerCol = chassis?.parentElement;
-            const bezelPadX = 28; // bezel horizontal padding approx
+            const vw = document.documentElement.clientWidth || window.innerWidth || 360;
+            const vh = window.innerHeight || 640;
+            const isMobile = vw < 1024;
 
             let availW, availH;
-            if (window.innerWidth < 1024) {
-                // Phone: nearly full width so the GB screen is large; frame hugs it.
-                availW = Math.max(160, (window.innerWidth || 360) - 16 - bezelPadX);
-                availH = Math.max(144, (window.innerHeight || 640) * 0.45);
+            if (isMobile) {
+                // Use almost the full CSS viewport. Chassis/bezel padding is
+                // kept minimal via CSS so ×2 fits on a typical 360-wide phone.
+                // Side gutter: 4px total. Bezel chrome ~12px total (0.4rem×2).
+                availW = Math.max(160, vw - 4 - 12);
+                // Reserve header + D-pad/actions + mobile tabs.
+                const reservedY = 52 /*header*/ + 44 /*tabs*/ + 190 /*controls*/ + 8;
+                availH = Math.max(144, vh - reservedY);
             } else {
-                const colW = centerCol?.clientWidth || 520;
-                availW = Math.max(160, colW - 16 - bezelPadX);
-                availH = Math.max(144, Math.min((window.innerHeight || 800) * 0.6, availW * (144 / 160) + 8));
+                const chassis = $('gb-chassis');
+                const centerCol = chassis?.parentElement;
+                const colW = centerCol?.clientWidth || 560;
+                // Desktop bezel padding ~20px total
+                availW = Math.max(160, colW - 24);
+                availH = Math.max(144, Math.min(vh * 0.65, availW * (144 / 160) + 16));
             }
 
-            // 1) Integer CSS scale → element lands on whole CSS pixels (avoids
-            //    subpixel box positioning that reintroduces uneven rows).
             const cssScale = Math.max(1, Math.floor(Math.min(availW / 160, availH / 144)));
-
-            // 2) Integer device pixels per source pixel (nearest to cssScale*dpr).
-            const deviceScale = Math.max(1, Math.round(cssScale * dpr));
-
             const cssW = 160 * cssScale;
             const cssH = 144 * cssScale;
-            const bufW = 160 * deviceScale;
-            const bufH = 144 * deviceScale;
 
-            if (deviceScale === _lastDeviceScale &&
-                canvas.width === bufW &&
+            if (cssScale === _lastCssScale &&
+                canvas.width === cssW &&
                 canvas.style.width === cssW + 'px') {
                 return;
             }
-            _lastDeviceScale = deviceScale;
+            _lastCssScale = cssScale;
 
+            // 1:1 CSS ↔ buffer — integer multiples only, no fractional stretch.
             canvas.style.width = cssW + 'px';
             canvas.style.height = cssH + 'px';
             wrap.style.width = cssW + 'px';
             wrap.style.height = cssH + 'px';
 
-            if (canvas.width !== bufW || canvas.height !== bufH) {
-                canvas.width = bufW;
-                canvas.height = bufH;
+            if (canvas.width !== cssW || canvas.height !== cssH) {
+                canvas.width = cssW;
+                canvas.height = cssH;
                 _displayCtx = null;
             }
 
             if (!_displayCtx) {
                 _displayCtx = canvas.getContext('2d', { alpha: false });
             }
-            _displayCtx.imageSmoothingEnabled = false;
+            disableSmoothing(_displayCtx);
+
+            // Optional debug in system log once per scale change
+            if (typeof log === 'function') {
+                const dpr = window.devicePixelRatio || 1;
+                log(`[SCALE] ×${cssScale} → ${cssW}×${cssH} CSS (${Math.round(cssW * dpr)}×${Math.round(cssH * dpr)} device px, dpr=${dpr})`);
+            }
         }
 
         function blitFrame(frameData) {
-            // frameData: Uint8ClampedArray length 160*144*4
             const { canvas: src, ctx: srcCtx } = getFrameSrc();
-            srcCtx.putImageData(new ImageData(frameData, 160, 144), 0, 0);
+            // ImageData needs a detached copy on some browsers when the source
+            // is a WASM heap view; slice only if the constructor would throw.
+            let img;
+            try {
+                img = new ImageData(frameData, 160, 144);
+            } catch (_) {
+                img = new ImageData(new Uint8ClampedArray(frameData), 160, 144);
+            }
+            srcCtx.putImageData(img, 0, 0);
 
             const canvas = $('gb-canvas');
             if (!canvas) return;
             if (!_displayCtx) {
                 _displayCtx = canvas.getContext('2d', { alpha: false });
             }
-            // Nearest-neighbor upscale into the device-pixel buffer.
-            _displayCtx.imageSmoothingEnabled = false;
+            disableSmoothing(_displayCtx);
+            // Nearest-neighbor upscale 160×144 → integer CSS size.
             _displayCtx.drawImage(src, 0, 0, 160, 144, 0, 0, canvas.width, canvas.height);
         }
 
