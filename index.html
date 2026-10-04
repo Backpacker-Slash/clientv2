@@ -86,7 +86,7 @@
             pointer-events: none;
         }
 
-        /* Game Boy Screen Bezel */
+        /* Game Boy Screen Bezel — hugs integer-scaled screen */
         .gb-screen-bezel {
             background: var(--gb-bezel-bg);
             border: 3px solid var(--gb-bezel-border);
@@ -97,6 +97,10 @@
                 0 1px 1px rgba(255, 255, 255, 0.08);
             position: relative;
             overflow: hidden;
+            width: fit-content;
+            max-width: 100%;
+            margin-left: auto;
+            margin-right: auto;
         }
 
         /* Acrylic screen glare streak */
@@ -116,31 +120,38 @@
             image-rendering: pixelated;
             image-rendering: -moz-crisp-edges;
             image-rendering: crisp-edges;
-            /* Sized in JS to an exact integer multiple of 160×144 — never
-               stretch with width:100%, which causes uneven 2px/3px rows. */
+            /* Exact CSS size is set by fitCanvasIntegerScale() — never width:100%. */
             width: 160px;
             height: 144px;
-            max-width: 100%;
-            max-height: 100%;
             background: #000;
             outline: none;
             display: block;
             flex-shrink: 0;
+            /* Avoid subpixel positioning from parent flex/grid */
+            margin: 0 auto;
         }
 
+        /* Screen frame hugs the integer-scaled canvas (width/height set in JS). */
         #gb-screen-wrap {
             position: relative;
-            width: 100%;
-            max-width: 420px;
-            aspect-ratio: 160 / 144;
+            width: 160px;   /* overwritten by JS to match canvas CSS size */
+            height: 144px;
             background: #000;
             border-radius: 0.5rem;
             overflow: hidden;
             border: 1px solid #27272a;
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            display: block;
+            margin: 0 auto;
+            flex-shrink: 0;
+        }
+
+        /* Chassis shrink-wraps to the screen + controls (not a fixed max-width box). */
+        #gb-chassis {
+            width: fit-content;
+            max-width: 100%;
+            margin-left: auto;
+            margin-right: auto;
         }
 
         /* Power LED with silver ring */
@@ -643,7 +654,7 @@
 
         <!-- CENTER COLUMN: HANDHELD GAME BOY CONSOLE -->
         <div class="lg:col-span-6 lg:order-2 order-1 flex flex-col items-center w-full">
-            <div id="gb-chassis" class="gb-chassis w-full max-w-[460px] p-3.5 sm:p-5 relative select-none">
+            <div id="gb-chassis" class="gb-chassis p-3 sm:p-4 relative select-none">
                 
                 <!-- Game Boy Screen Bezel -->
                 <div class="gb-screen-bezel p-3 sm:p-4 relative flex flex-col items-center">
@@ -1097,41 +1108,100 @@
         }
 
         // ============================================================
-        // INTEGER PIXEL SCALE (no fractional 2px/3px rows or columns)
+        // INTEGER PIXEL SCALE (DPR-aware, no fractional physical pixels)
         // ============================================================
-        let _lastCanvasScale = 0;
+        // Desktop fractional devicePixelRatio (1.25, 1.5, …) is why CSS-only
+        // integer scale still looks uneven: 2 CSS px × 1.25 DPR = 2.5 device
+        // pixels per source pixel. We instead scale in *device* pixels and
+        // blit with imageSmoothingEnabled = false.
+        let _lastDeviceScale = 0;
+        let _frameSrcCanvas = null; // 160×144 staging canvas for putImageData
+        let _frameSrcCtx = null;
+        let _displayCtx = null;
+
+        function getFrameSrc() {
+            if (!_frameSrcCanvas) {
+                _frameSrcCanvas = document.createElement('canvas');
+                _frameSrcCanvas.width = 160;
+                _frameSrcCanvas.height = 144;
+                _frameSrcCtx = _frameSrcCanvas.getContext('2d', { alpha: false });
+            }
+            return { canvas: _frameSrcCanvas, ctx: _frameSrcCtx };
+        }
 
         function fitCanvasIntegerScale() {
             const canvas = $('gb-canvas');
             const wrap = $('gb-screen-wrap');
             if (!canvas || !wrap) return;
 
-            // Available space inside the bezel container.
-            const availW = wrap.clientWidth || wrap.offsetWidth || 320;
-            const availH = wrap.clientHeight || wrap.offsetHeight || 288;
-            if (availW < 1 || availH < 1) return;
+            const dpr = window.devicePixelRatio || 1;
 
-            // Largest integer scale that fits both axes (no fractional pixels).
-            const scale = Math.max(1, Math.floor(Math.min(availW / 160, availH / 144)));
-            if (scale === _lastCanvasScale &&
-                canvas.style.width === (160 * scale) + 'px') {
+            // Available CSS space: use the center column / viewport, not the wrap
+            // (wrap is sized TO the canvas — measuring it would lock the scale).
+            const chassis = $('gb-chassis');
+            const centerCol = chassis?.parentElement;
+            const bezelPadX = 28; // bezel horizontal padding approx
+
+            let availW, availH;
+            if (window.innerWidth < 1024) {
+                // Phone: nearly full width so the GB screen is large; frame hugs it.
+                availW = Math.max(160, (window.innerWidth || 360) - 16 - bezelPadX);
+                availH = Math.max(144, (window.innerHeight || 640) * 0.45);
+            } else {
+                const colW = centerCol?.clientWidth || 520;
+                availW = Math.max(160, colW - 16 - bezelPadX);
+                availH = Math.max(144, Math.min((window.innerHeight || 800) * 0.6, availW * (144 / 160) + 8));
+            }
+
+            // 1) Integer CSS scale → element lands on whole CSS pixels (avoids
+            //    subpixel box positioning that reintroduces uneven rows).
+            const cssScale = Math.max(1, Math.floor(Math.min(availW / 160, availH / 144)));
+
+            // 2) Integer device pixels per source pixel (nearest to cssScale*dpr).
+            const deviceScale = Math.max(1, Math.round(cssScale * dpr));
+
+            const cssW = 160 * cssScale;
+            const cssH = 144 * cssScale;
+            const bufW = 160 * deviceScale;
+            const bufH = 144 * deviceScale;
+
+            if (deviceScale === _lastDeviceScale &&
+                canvas.width === bufW &&
+                canvas.style.width === cssW + 'px') {
                 return;
             }
-            _lastCanvasScale = scale;
+            _lastDeviceScale = deviceScale;
 
-            const cssW = 160 * scale;
-            const cssH = 144 * scale;
-
-            // CSS display size = exact integer multiple. Browser nearest-neighbor
-            // upscales the 160×144 backing store via image-rendering: pixelated.
             canvas.style.width = cssW + 'px';
             canvas.style.height = cssH + 'px';
+            wrap.style.width = cssW + 'px';
+            wrap.style.height = cssH + 'px';
 
-            // Only reset the backing store if something changed it.
-            if (canvas.width !== 160 || canvas.height !== 144) {
-                canvas.width = 160;
-                canvas.height = 144;
+            if (canvas.width !== bufW || canvas.height !== bufH) {
+                canvas.width = bufW;
+                canvas.height = bufH;
+                _displayCtx = null;
             }
+
+            if (!_displayCtx) {
+                _displayCtx = canvas.getContext('2d', { alpha: false });
+            }
+            _displayCtx.imageSmoothingEnabled = false;
+        }
+
+        function blitFrame(frameData) {
+            // frameData: Uint8ClampedArray length 160*144*4
+            const { canvas: src, ctx: srcCtx } = getFrameSrc();
+            srcCtx.putImageData(new ImageData(frameData, 160, 144), 0, 0);
+
+            const canvas = $('gb-canvas');
+            if (!canvas) return;
+            if (!_displayCtx) {
+                _displayCtx = canvas.getContext('2d', { alpha: false });
+            }
+            // Nearest-neighbor upscale into the device-pixel buffer.
+            _displayCtx.imageSmoothingEnabled = false;
+            _displayCtx.drawImage(src, 0, 0, 160, 144, 0, 0, canvas.width, canvas.height);
         }
 
         // ============================================================
@@ -1823,8 +1893,9 @@
             const getFb = getExport('get_frame_buffer_ptr');
             if (getFb) {
                 const fbPtr = getFb(emulatorPtr);
+                // View into WASM heap — blitFrame stages it then nearest-neighbor upscales.
                 const frameData = new Uint8ClampedArray(module.HEAPU8.buffer, fbPtr, 160 * 144 * 4);
-                $('gb-canvas').getContext('2d').putImageData(new ImageData(frameData, 160, 144), 0, 0);
+                blitFrame(frameData);
             }
 
             lastTickTime = performance.now();
