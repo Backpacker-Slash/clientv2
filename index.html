@@ -1217,6 +1217,14 @@
         // with the emulator on some mobile browsers.
         const ENABLE_HAPTIC_FEEDBACK = false;
 
+        // On phones, native CSS :active already provides the button-pressed
+        // appearance. Avoid classList/DOM work in the hot touch-input path;
+        // this keeps rapid A/B tapping from competing with the emulator loop.
+        const USE_JS_VISUAL_FEEDBACK = !(
+            window.matchMedia &&
+            window.matchMedia('(hover: none) and (pointer: coarse)').matches
+        );
+
         // Action-button touch/pointer state is kept globally so resetAllButtons()
         // can clear it. Delegated pointer listeners below also survive DOM
         // replacement, which avoids the old reset/input-listener problem.
@@ -1269,9 +1277,13 @@
                 }
             }
 
-            // Cheap cached visual feedback. No DOM query on every input event.
-            const els = getButtonElements(btn);
-            els.forEach(el => el.classList.toggle('pressed', isPressed));
+            // Desktop/pen/mouse: keep the JS pressed class for held-button
+            // feedback. Touch devices use native CSS :active instead, avoiding
+            // layout/style work for every rapid tap.
+            if (USE_JS_VISUAL_FEEDBACK) {
+                const els = getButtonElements(btn);
+                els.forEach(el => el.classList.toggle('pressed', isPressed));
+            }
 
             if (ENABLE_HAPTIC_FEEDBACK && isPressed && navigator.vibrate) {
                 try { navigator.vibrate(10); } catch (_) {}
@@ -1297,7 +1309,9 @@
                     }
                 }
 
-                getButtonElements(btn).forEach(el => el.classList.remove('pressed'));
+                if (USE_JS_VISUAL_FEEDBACK) {
+                    getButtonElements(btn).forEach(el => el.classList.remove('pressed'));
+                }
             }
         }
 
