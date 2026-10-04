@@ -2,45 +2,416 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TCG RAM-Sync Launcher</title>
-    <meta name="description" content="Pokemon TCG Online Duel Client with WebRTC Lockstep RAM-Sync." />
-    <meta property="og:title" content="TCG RAM-Sync Launcher" />
-    <meta property="og:description" content="Pokemon TCG Online Duel Client with WebRTC Lockstep RAM-Sync." />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Pokemon TCG Online Link Duel</title>
+    <meta name="description" content="Pokemon TCG Online Duel Client with WebRTC Lockstep RAM-Sync, Game Boy tactile controls, and mobile touch support." />
+    <meta property="og:title" content="Pokemon TCG Online Link Duel" />
+    <meta property="og:description" content="Pokemon TCG Online Duel Client with WebRTC Lockstep RAM-Sync, Game Boy tactile controls, and mobile touch support." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <script src="peerjs.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
 
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600;700&family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+        :root {
+            --gb-shell-bg: linear-gradient(168deg, #272d3f 0%, #1a1e2d 55%, #10131d 100%);
+            --gb-bezel-bg: #11141c;
+            --gb-bezel-border: #232738;
+            --dpad-plastic: linear-gradient(145deg, #2a3445, #18202d);
+            --dpad-pressed: linear-gradient(145deg, #141b26, #0c1017);
+            --action-btn-bg: radial-gradient(circle at 35% 28%, #fb7185 0%, #e11d48 40%, #9f1239 80%, #700c26 100%);
+            --action-btn-pressed: radial-gradient(circle at 50% 50%, #9f1239 0%, #4c0519 100%);
+        }
+
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
 
         body {
-            background-color: #0f172a;
+            background-color: #080b12;
             color: #e2e8f0;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+            overflow-x: hidden;
+            margin: 0;
+            padding: 0;
+        }
+
+        .font-mono {
             font-family: 'Fira Code', monospace;
         }
 
-        canvas {
+        /* Authentic Game Boy Color Handheld Chassis */
+        .gb-chassis {
+            background: var(--gb-shell-bg);
+            border: 2px solid #333c52;
+            border-top: 3px solid #45506d;
+            border-radius: 36px 36px 44px 44px;
+            box-shadow: 
+                0 25px 50px -12px rgba(0, 0, 0, 0.85),
+                0 4px 12px rgba(0, 0, 0, 0.5),
+                inset 0 2px 2px rgba(255, 255, 255, 0.18),
+                inset 0 -3px 6px rgba(0, 0, 0, 0.6);
+            position: relative;
+            transition: all 0.2s ease;
+        }
+
+        /* Subtle curved grip indent on Game Boy sides */
+        .gb-chassis::before {
+            content: '';
+            position: absolute;
+            top: 22%;
+            bottom: 30%;
+            left: -3px;
+            width: 3px;
+            border-radius: 4px 0 0 4px;
+            background: rgba(255, 255, 255, 0.08);
+            pointer-events: none;
+        }
+
+        .gb-chassis::after {
+            content: '';
+            position: absolute;
+            top: 22%;
+            bottom: 30%;
+            right: -3px;
+            width: 3px;
+            border-radius: 0 4px 4px 0;
+            background: rgba(0, 0, 0, 0.4);
+            pointer-events: none;
+        }
+
+        /* Game Boy Screen Bezel */
+        .gb-screen-bezel {
+            background: var(--gb-bezel-bg);
+            border: 3px solid var(--gb-bezel-border);
+            border-bottom: 4px solid #1a1e2b;
+            border-radius: 20px 20px 26px 26px;
+            box-shadow: 
+                inset 0 3px 10px rgba(0, 0, 0, 0.95),
+                0 1px 1px rgba(255, 255, 255, 0.08);
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Acrylic screen glare streak */
+        .gb-screen-bezel::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 38%;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.0) 100%);
+            border-radius: 17px 17px 0 0;
+            pointer-events: none;
+        }
+
+        #gb-canvas {
             image-rendering: pixelated;
-            width: 480px;
-            height: 432px;
+            image-rendering: crisp-edges;
+            width: 100%;
+            aspect-ratio: 160 / 144;
+            height: auto;
             background: #000;
-            border: 4px solid #334155;
-            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
             outline: none;
+            display: block;
         }
 
-        canvas:focus {
-            border-color: #3b82f6;
-            box-shadow: 0 0 25px rgba(59, 130, 246, 0.3);
+        /* Power LED with silver ring */
+        .power-led-ring {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #475569, #1e293b);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.3), 0 1px 2px rgba(0, 0, 0, 0.6);
         }
 
+        /* Tactile Game Boy Cross D-Pad */
+        .dpad-container {
+            width: 138px;
+            height: 138px;
+            position: relative;
+            border-radius: 50%;
+            background: #0b0f17;
+            box-shadow: 
+                inset 0 3px 8px rgba(0, 0, 0, 0.95),
+                0 1px 1px rgba(255, 255, 255, 0.08);
+            border: 1px solid #1f2736;
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        @media (min-width: 640px) {
+            .dpad-container {
+                width: 146px;
+                height: 146px;
+            }
+        }
+
+        .dpad-btn {
+            position: absolute;
+            background: var(--dpad-plastic);
+            border: 1px solid #3d4a61;
+            box-shadow: 
+                0 4px 6px rgba(0, 0, 0, 0.6),
+                inset 0 1px 1px rgba(255, 255, 255, 0.25);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            touch-action: none;
+            transition: transform 0.04s ease, background 0.04s ease, box-shadow 0.04s ease;
+            z-index: 2;
+        }
+
+        .dpad-btn span {
+            color: #64748b;
+            font-size: 13px;
+            transition: color 0.04s ease, transform 0.04s ease;
+            text-shadow: 0 1px 1px rgba(0, 0, 0, 0.8);
+            pointer-events: none;
+        }
+
+        .dpad-btn:active, .dpad-btn.pressed {
+            background: var(--dpad-pressed);
+            box-shadow: inset 0 3px 6px rgba(0, 0, 0, 0.95);
+            transform: translateY(2px);
+        }
+
+        .dpad-btn:active span, .dpad-btn.pressed span {
+            color: #38bdf8;
+            transform: scale(0.92);
+            text-shadow: 0 0 6px rgba(56, 189, 248, 0.6);
+        }
+
+        .dpad-up {
+            top: 6px;
+            left: 33.5%;
+            width: 33%;
+            height: 38%;
+            border-radius: 9px 9px 0 0;
+            border-bottom: none;
+        }
+
+        .dpad-down {
+            bottom: 6px;
+            left: 33.5%;
+            width: 33%;
+            height: 38%;
+            border-radius: 0 0 9px 9px;
+            border-top: none;
+        }
+
+        .dpad-left {
+            top: 33.5%;
+            left: 6px;
+            width: 38%;
+            height: 33%;
+            border-radius: 9px 0 0 9px;
+            border-right: none;
+        }
+
+        .dpad-right {
+            top: 33.5%;
+            right: 6px;
+            width: 38%;
+            height: 33%;
+            border-radius: 0 9px 9px 0;
+            border-left: none;
+        }
+
+        /* Authentic Concave Center Pivot Bowl */
+        .dpad-center {
+            position: absolute;
+            top: 33.5%;
+            left: 33.5%;
+            width: 33%;
+            height: 33%;
+            background: #18202d;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 3;
+            pointer-events: none;
+        }
+
+        .dpad-center::after {
+            content: '';
+            width: 60%;
+            height: 60%;
+            border-radius: 50%;
+            background: radial-gradient(circle at 45% 45%, #0e141d 0%, #1b2331 80%, #0a0d13 100%);
+            box-shadow: 
+                inset 0 2px 4px rgba(0, 0, 0, 0.9),
+                0 1px 1px rgba(255, 255, 255, 0.15);
+            border: 1px solid #111722;
+        }
+
+        /* Tactile Action Buttons Pod (A & B) */
+        .action-pod {
+            background: #0b0f17;
+            border-radius: 9999px;
+            border: 1.5px solid #202838;
+            box-shadow: 
+                inset 0 3px 8px rgba(0, 0, 0, 0.95),
+                0 1px 1px rgba(255, 255, 255, 0.08);
+            transform: rotate(-25deg);
+            padding: 5px 8px;
+            position: relative;
+        }
+
+        .btn-action {
+            width: 52px;
+            height: 52px;
+            border-radius: 50%;
+            background: var(--action-btn-bg);
+            border: 2px solid #be123c;
+            border-top: 2px solid #fb7185;
+            box-shadow: 
+                0 6px 14px rgba(0, 0, 0, 0.75),
+                inset 0 2px 3px rgba(255, 255, 255, 0.45),
+                inset 0 -3px 5px rgba(0, 0, 0, 0.65);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 900;
+            font-size: 19px;
+            font-style: italic;
+            color: #fff1f2;
+            cursor: pointer;
+            touch-action: none;
+            transition: transform 0.04s ease, box-shadow 0.04s ease;
+            text-shadow: 0 -1px 1px rgba(0, 0, 0, 0.8), 0 1px 2px rgba(255, 255, 255, 0.35);
+        }
+
+        @media (min-width: 640px) {
+            .btn-action {
+                width: 58px;
+                height: 58px;
+                font-size: 21px;
+            }
+        }
+
+        .btn-action:active, .btn-action.pressed {
+            background: var(--action-btn-pressed);
+            box-shadow: 
+                inset 0 4px 8px rgba(0, 0, 0, 0.95),
+                0 2px 4px rgba(0, 0, 0, 0.5);
+            transform: translateY(2.5px) scale(0.96);
+            color: #fbcfe8;
+        }
+
+        /* Pill Buttons (Select & Start) */
+        .pill-pod {
+            background: #0b0f17;
+            border-radius: 9999px;
+            border: 1px solid #1f2736;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.9);
+            padding: 3px 4px;
+            transform: rotate(-25deg);
+        }
+
+        .btn-pill {
+            width: 48px;
+            height: 14px;
+            border-radius: 9999px;
+            background: linear-gradient(180deg, #475569 0%, #334155 70%, #1e293b 100%);
+            border: 1px solid #1e293b;
+            box-shadow: 
+                0 3px 6px rgba(0, 0, 0, 0.6),
+                inset 0 1px 1px rgba(255, 255, 255, 0.25);
+            cursor: pointer;
+            touch-action: none;
+            display: block;
+            transition: transform 0.04s ease, box-shadow 0.04s ease, background 0.04s ease;
+        }
+
+        .btn-pill:active, .btn-pill.pressed {
+            background: #1e293b;
+            box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.95);
+            transform: translateY(1.5px) scale(0.96);
+        }
+
+        /* Device Adaptive Layout (Portrait vs Landscape on Phone) */
+        @media (max-width: 1023px) and (orientation: portrait) {
+            .mobile-portrait-stack {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                width: 100%;
+            }
+        }
+
+        /* Landscape Phone Handheld Experience */
+        @media (orientation: landscape) and (max-height: 560px) {
+            body {
+                overflow: hidden;
+            }
+            .landscape-handheld {
+                display: grid !important;
+                grid-template-columns: 140px 1fr 140px !important;
+                height: 100vh !important;
+                max-height: 100vh !important;
+                padding: 4px !important;
+                align-items: center !important;
+                gap: 8px !important;
+            }
+            .landscape-left-wing {
+                display: flex !important;
+                flex-direction: column !important;
+                align-items: center !important;
+                justify-content: center !important;
+                gap: 12px !important;
+            }
+            .landscape-center-screen {
+                display: flex !important;
+                flex-direction: column !important;
+                align-items: center !important;
+                justify-content: center !important;
+                height: 100% !important;
+            }
+            .landscape-right-wing {
+                display: flex !important;
+                flex-direction: column !important;
+                align-items: center !important;
+                justify-content: center !important;
+                gap: 12px !important;
+            }
+            .landscape-hide {
+                display: none !important;
+            }
+            .dpad-container {
+                width: 120px !important;
+                height: 120px !important;
+            }
+            .btn-action {
+                width: 48px !important;
+                height: 48px !important;
+                font-size: 17px !important;
+            }
+            .gb-chassis {
+                border-radius: 20px !important;
+                padding: 8px !important;
+            }
+        }
+
+        /* Log Line Styling */
         .log-line {
-            border-left: 2px solid #3b82f6;
+            border-left: 2px solid #38bdf8;
             padding-left: 8px;
             margin-bottom: 4px;
-            font-size: 0.75rem;
+            font-size: 0.72rem;
+            line-height: 1.35;
         }
 
         .hide-scroll::-webkit-scrollbar {
@@ -49,122 +420,118 @@
     </style>
 </head>
 
-<body class="p-4 flex flex-col items-center min-h-screen">
+<body class="p-2 sm:p-4 flex flex-col items-center min-h-[100dvh]">
 
-    <div class="w-full max-w-6xl flex justify-between items-center mb-6 bg-slate-800 p-4 rounded-lg border border-slate-700">
-        <div>
-            <h1 class="text-xl font-bold text-blue-400">
-                TCG RAM-SYNC
-                <span class="text-xs text-slate-500 font-normal">v0.5.0 (FIFO)</span>
-            </h1>
-
-            <div class="text-sm">
-                STATUS:
-                <span id="conn-status" class="text-yellow-500 font-bold uppercase">
-                    Disconnected
-                </span>
+    <!-- TOP HEADER & CONNECTION BAR -->
+    <header class="w-full max-w-6xl flex flex-wrap justify-between items-center gap-2.5 sm:gap-4 mb-3 sm:mb-4 bg-slate-900/90 p-2.5 sm:p-4 rounded-2xl border border-slate-800 shadow-xl backdrop-blur">
+        <div class="flex items-center gap-2.5 sm:gap-3">
+            <div class="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_12px_#10b981] animate-pulse"></div>
+            <div>
+                <h1 class="text-sm sm:text-lg font-bold tracking-tight text-white flex items-center gap-1.5 sm:gap-2">
+                    POKÉMON TCG
+                    <span class="text-[9px] sm:text-xs font-semibold px-2 py-0.5 rounded bg-blue-950 text-blue-400 border border-blue-800/60 font-mono">LINK DUEL</span>
+                </h1>
+                <div class="text-[10px] sm:text-[11px] text-slate-400 flex items-center gap-1.5 font-mono">
+                    <span>STATUS:</span>
+                    <span id="conn-status" class="text-amber-400 font-bold uppercase tracking-wider">Disconnected</span>
+                </div>
             </div>
         </div>
 
-        <div class="flex gap-3 items-center">
-            <div class="text-right">
-                <div class="text-[10px] text-slate-400">ROOM CODE</div>
-                <div
-                    id="room-code"
-                    class="text-sm font-bold text-white tracking-widest select-all"
-                >
-                    ------
+        <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+            <!-- Room Code with Click-to-Copy -->
+            <button id="btn-copy-code" type="button" title="Click to copy room code" class="bg-slate-950 px-3 py-1 rounded-xl border border-slate-800 text-right cursor-pointer hover:border-sky-500 transition group">
+                <div class="text-[9px] text-slate-500 group-hover:text-sky-400 uppercase font-semibold tracking-wider font-mono flex items-center gap-1 justify-end">
+                    <span>Room Code</span>
+                    <span class="text-[8px]">📋</span>
                 </div>
-            </div>
+                <div id="room-code" class="text-xs sm:text-sm font-bold text-sky-400 tracking-widest font-mono">------</div>
+            </button>
 
-            <button
-                id="btn-host"
-                class="bg-emerald-700 hover:bg-emerald-600 px-3 py-1 rounded text-sm font-bold transition"
-            >
+            <button id="btn-host" class="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white px-3 sm:px-3.5 py-1.5 rounded-xl text-xs font-bold transition shadow-md cursor-pointer">
                 HOST
             </button>
 
-            <input
-                type="text"
-                id="remote-id"
-                placeholder="ROOM CODE"
-                maxlength="6"
-                class="bg-slate-900 border border-slate-600 px-3 py-1 rounded text-sm uppercase tracking-widest focus:outline-none focus:border-blue-500 w-32"
-            >
+            <div class="flex items-center gap-1 sm:gap-1.5">
+                <input type="text" id="remote-id" placeholder="CODE" maxlength="6" class="bg-slate-950 border border-slate-700 px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-mono uppercase tracking-widest focus:outline-none focus:border-blue-500 w-20 sm:w-28 text-center text-white placeholder-slate-600">
+                <button id="btn-connect" class="bg-blue-600 hover:bg-blue-500 active:scale-95 text-white px-3 sm:px-3.5 py-1.5 rounded-xl text-xs font-bold transition shadow-md cursor-pointer">
+                    JOIN
+                </button>
+            </div>
 
-            <button
-                id="btn-connect"
-                class="bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded text-sm font-bold transition"
-            >
-                JOIN
+            <!-- Audio Resume / Sound Button -->
+            <button id="btn-audio-toggle" type="button" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-xl text-xs font-mono cursor-pointer transition flex items-center gap-1" title="Toggle / Resume Audio">
+                <span id="audio-icon">🔊</span>
             </button>
         </div>
-    </div>
+    </header>
 
-    <div class="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-12 gap-6">
+    <!-- MAIN INTERFACE GRID -->
+    <main class="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 items-start">
 
-        <!-- LEFT -->
-        <div class="lg:col-span-3 flex flex-col gap-4">
+        <!-- LEFT COLUMN: FILE & SAVE MANAGEMENT + KEYBOARD GUIDE (Desktop) -->
+        <div id="panel-files-col" class="lg:col-span-3 lg:order-1 order-2 flex flex-col gap-4 w-full">
 
-            <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
-                <h3 class="text-xs font-bold text-slate-400 mb-3 uppercase tracking-tighter">
-                    File Management
+            <div class="bg-slate-900/90 p-4 rounded-2xl border border-slate-800 shadow-lg">
+                <h3 class="text-xs font-bold text-slate-400 mb-3 uppercase tracking-wider font-mono flex items-center justify-between">
+                    <span>File Management</span>
+                    <span class="text-[10px] text-slate-500">ROM & SAV</span>
                 </h3>
 
-                <div class="space-y-3">
+                <div class="space-y-3 font-sans">
                     <div>
                         <div class="flex items-center justify-between text-[10px] uppercase mb-1">
-                            <span class="text-slate-500 font-bold">1. ROM File</span>
-                            <span id="rom-status" class="text-slate-400">Searching server...</span>
+                            <span class="text-slate-400 font-bold">1. ROM File</span>
+                            <span id="rom-status" class="text-sky-400 font-mono text-[9px]">Searching server...</span>
                         </div>
                         <input
                             type="file"
                             id="rom-upload"
                             accept=".gbc,.gb"
-                            class="text-xs w-full block text-slate-400 file:mr-4 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-slate-200 hover:file:bg-slate-600"
+                            class="text-xs w-full block text-slate-400 file:mr-3 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-[11px] file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
                         >
-                        <p class="text-[9px] text-slate-500 mt-0.5">Optional override if auto-load is active</p>
+                        <p class="text-[9px] text-slate-500 mt-1">Auto-loads poketcg-duel-client.gbc</p>
                     </div>
 
                     <div>
                         <div class="flex items-center justify-between text-[10px] uppercase mb-1">
-                            <span class="text-slate-500 font-bold">2. Save Data</span>
-                            <span id="sav-status" class="text-slate-400">Checking storage...</span>
+                            <span class="text-slate-400 font-bold">2. Save Data</span>
+                            <span id="sav-status" class="text-slate-400 font-mono text-[9px]">Checking storage...</span>
                         </div>
                         <input
                             type="file"
                             id="sav-upload"
                             accept=".sav"
-                            class="text-xs w-full block text-slate-400 file:mr-4 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-slate-200 hover:file:bg-slate-600"
+                            class="text-xs w-full block text-slate-400 file:mr-3 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-[11px] file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
                         >
-                        <p class="text-[9px] text-slate-500 mt-0.5">Auto-saves to browser. Upload to import custom .sav</p>
+                        <p class="text-[9px] text-slate-500 mt-1">Auto-saves to browser IndexedDB</p>
                     </div>
 
                     <button
                         id="btn-start"
-                        class="w-full bg-blue-600 hover:bg-blue-500 py-2.5 rounded text-xs font-bold transition-all shadow-lg cursor-pointer"
+                        class="w-full bg-blue-600 hover:bg-blue-500 active:scale-98 py-2.5 rounded-xl text-xs font-bold transition-all shadow-lg cursor-pointer tracking-wider uppercase text-white font-mono"
                     >
                         START GAME
                     </button>
 
-                    <div class="grid grid-cols-3 gap-2 pt-1">
+                    <div class="grid grid-cols-3 gap-2 pt-1 font-mono">
                         <button
                             id="btn-save-now"
-                            class="w-full bg-blue-700 hover:bg-blue-600 text-white py-1.5 rounded text-[11px] font-bold disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shadow flex items-center justify-center gap-1"
+                            class="w-full bg-blue-700 hover:bg-blue-600 text-white py-2 rounded-lg text-[10px] font-bold disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shadow transition active:scale-95 flex items-center justify-center gap-1"
                             disabled
                         >
                             💾 SAVE
                         </button>
                         <button
                             id="btn-download-sav"
-                            class="w-full bg-emerald-700 hover:bg-emerald-600 py-1.5 rounded text-[11px] font-bold disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                            class="w-full bg-emerald-700 hover:bg-emerald-600 text-white py-2 rounded-lg text-[10px] font-bold disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shadow transition active:scale-95"
                             disabled
                         >
                             EXPORT
                         </button>
                         <button
                             id="btn-clear-sav"
-                            class="w-full bg-rose-900/60 hover:bg-rose-800 text-rose-300 py-1.5 rounded text-[11px] font-bold border border-rose-700/50 cursor-pointer"
+                            class="w-full bg-rose-950/60 hover:bg-rose-900 text-rose-300 py-2 rounded-lg text-[10px] font-bold border border-rose-800/50 cursor-pointer shadow transition active:scale-95"
                         >
                             RESET
                         </button>
@@ -172,96 +539,245 @@
                 </div>
             </div>
 
-            <div class="bg-slate-800 p-4 rounded-lg border border-slate-700 flex-1 flex flex-col overflow-hidden max-h-[400px]">
-                <h3 class="text-xs font-bold text-slate-400 mb-3 uppercase tracking-tighter">
+            <!-- Desktop Keyboard Controls Cheatsheet -->
+            <div class="hidden lg:block bg-slate-900/90 p-4 rounded-2xl border border-slate-800 shadow-lg text-[11px]">
+                <h3 class="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider font-mono flex items-center justify-between">
+                    <span>Keyboard Controls</span>
+                    <span class="text-[9px] text-sky-400">Desktop</span>
+                </h3>
+                <div class="space-y-1.5 font-mono text-slate-300 text-[10px]">
+                    <div class="flex justify-between py-0.5 border-b border-slate-800/60">
+                        <span class="text-slate-400">D-Pad</span>
+                        <span><kbd class="px-1 bg-slate-800 border border-slate-700 rounded text-slate-200">WASD</kbd> / <kbd class="px-1 bg-slate-800 border border-slate-700 rounded text-slate-200">Arrows</kbd></span>
+                    </div>
+                    <div class="flex justify-between py-0.5 border-b border-slate-800/60">
+                        <span class="text-slate-400">Button A</span>
+                        <span><kbd class="px-1 bg-slate-800 border border-slate-700 rounded text-rose-300 font-bold">X</kbd> / <kbd class="px-1 bg-slate-800 border border-slate-700 rounded text-slate-200">J</kbd></span>
+                    </div>
+                    <div class="flex justify-between py-0.5 border-b border-slate-800/60">
+                        <span class="text-slate-400">Button B</span>
+                        <span><kbd class="px-1 bg-slate-800 border border-slate-700 rounded text-rose-300 font-bold">Z</kbd> / <kbd class="px-1 bg-slate-800 border border-slate-700 rounded text-slate-200">K</kbd></span>
+                    </div>
+                    <div class="flex justify-between py-0.5 border-b border-slate-800/60">
+                        <span class="text-slate-400">Start</span>
+                        <span><kbd class="px-1.5 bg-slate-800 border border-slate-700 rounded text-slate-200">Enter</kbd></span>
+                    </div>
+                    <div class="flex justify-between py-0.5">
+                        <span class="text-slate-400">Select</span>
+                        <span><kbd class="px-1.5 bg-slate-800 border border-slate-700 rounded text-slate-200">Space</kbd> / <kbd class="px-1 bg-slate-800 border border-slate-700 rounded text-slate-200">Tab</kbd></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- System Logs -->
+            <div id="panel-logs-col" class="bg-slate-900/90 p-4 rounded-2xl border border-slate-800 shadow-lg flex flex-col overflow-hidden max-h-[300px]">
+                <h3 class="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider font-mono">
                     System Log
                 </h3>
 
                 <div
                     id="system-logs"
-                    class="overflow-y-auto flex-1 font-mono text-slate-300 hide-scroll"
+                    class="overflow-y-auto flex-1 font-mono text-slate-300 hide-scroll text-[11px] pr-1"
                 >
-                    <div class="log-line">
+                    <div class="log-line text-slate-400">
                         Ready to load files...
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- CENTER -->
-        <div class="lg:col-span-6 flex flex-col items-center">
-            <div class="relative group">
+        <!-- CENTER COLUMN: HANDHELD GAME BOY CONSOLE -->
+        <div class="lg:col-span-6 lg:order-2 order-1 flex flex-col items-center w-full">
+            <div id="gb-chassis" class="gb-chassis w-full max-w-[460px] p-3.5 sm:p-5 relative select-none">
+                
+                <!-- Game Boy Screen Bezel -->
+                <div class="gb-screen-bezel p-3 sm:p-4 relative flex flex-col items-center">
+                    
+                    <!-- Top bezel accents: Power LED & Stereo indicator -->
+                    <div class="w-full flex items-center justify-between text-[10px] text-zinc-500 font-sans font-bold px-1 mb-2">
+                        <div class="flex items-center gap-2">
+                            <div class="power-led-ring">
+                                <span id="power-led" class="w-2.5 h-2.5 rounded-full bg-rose-900 border border-zinc-700 shadow-none transition-all"></span>
+                            </div>
+                            <span class="tracking-widest text-[9px] text-zinc-400 font-mono">POWER</span>
+                        </div>
+                        <div class="text-[9px] tracking-wider text-zinc-400 uppercase flex items-center gap-1.5 font-mono">
+                            <span>STEREO</span>
+                            <span class="text-sky-400">●</span>
+                        </div>
+                    </div>
 
-                <canvas
-                    id="gb-canvas"
-                    width="160"
-                    height="144"
-                    tabindex="0"
-                ></canvas>
+                    <!-- Screen Canvas Container -->
+                    <div class="relative w-full aspect-[160/144] max-w-[420px] bg-black rounded-lg overflow-hidden border border-zinc-800 shadow-2xl flex items-center justify-center">
+                        <canvas id="gb-canvas" width="160" height="144" tabindex="0" class="cursor-pointer"></canvas>
 
-                <div
-                    id="focus-overlay"
-                    class="absolute inset-0 bg-black/60 flex flex-col items-center justify-center cursor-pointer transition-opacity z-20 hidden"
-                >
-                    <span class="text-white font-bold text-sm bg-blue-600 px-6 py-3 rounded-full shadow-2xl mb-2">
-                        CLICK TO RESUME AUDIO
-                    </span>
+                        <!-- Audio Resume Overlay -->
+                        <div id="focus-overlay" class="absolute inset-0 bg-black/80 flex flex-col items-center justify-center cursor-pointer transition-opacity z-20 hidden p-4 text-center">
+                            <span class="text-white font-bold text-xs sm:text-sm bg-blue-600 hover:bg-blue-500 px-5 py-2.5 rounded-full shadow-2xl transition active:scale-95 font-sans flex items-center gap-2">
+                                <span>🔊</span> CLICK TO RESUME AUDIO
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Bottom Bezel Logo: GAME BOY COLOR with Authentic Multicolor -->
+                    <div class="w-full flex items-center justify-between mt-2.5 px-2">
+                        <div class="font-sans font-extrabold tracking-wider text-xs sm:text-sm text-zinc-300 italic flex items-center gap-1.5">
+                            <span class="tracking-[0.14em] text-zinc-200 drop-shadow">GAME BOY</span>
+                            <span class="font-black text-[11px] sm:text-xs tracking-tight inline-flex drop-shadow">
+                                <span class="text-rose-500">C</span>
+                                <span class="text-amber-400">O</span>
+                                <span class="text-emerald-400">L</span>
+                                <span class="text-cyan-400">O</span>
+                                <span class="text-purple-400">R</span>
+                            </span>
+                        </div>
+                        <!-- Angled Speaker Grille Slits -->
+                        <div class="flex gap-1 items-center rotate-[-25deg] opacity-60">
+                            <div class="w-1 h-3 bg-zinc-700 rounded-full"></div>
+                            <div class="w-1 h-4 bg-zinc-700 rounded-full"></div>
+                            <div class="w-1 h-4.5 bg-zinc-700 rounded-full"></div>
+                            <div class="w-1 h-4 bg-zinc-700 rounded-full"></div>
+                            <div class="w-1 h-3 bg-zinc-700 rounded-full"></div>
+                        </div>
+                    </div>
                 </div>
+
+                <!-- CONTROLLER SECTION (D-Pad, A/B, Select/Start) -->
+                <div class="controller-area w-full mt-4 sm:mt-6 pb-2 select-none touch-none">
+                    
+                    <!-- Upper Row: Tactile D-Pad & Action Buttons -->
+                    <div class="flex justify-between items-center px-1 sm:px-4">
+                        
+                        <!-- D-PAD CROSS -->
+                        <div class="dpad-wrapper flex flex-col items-center">
+                            <div id="dpad-cross" class="dpad-container">
+                                <!-- Up Button -->
+                                <button type="button" data-gb-btn="up" class="dpad-btn dpad-up" aria-label="Up">
+                                    <span>▲</span>
+                                </button>
+                                <!-- Left Button -->
+                                <button type="button" data-gb-btn="left" class="dpad-btn dpad-left" aria-label="Left">
+                                    <span>◀</span>
+                                </button>
+                                <!-- Center Pivot Bowl -->
+                                <div class="dpad-center"></div>
+                                <!-- Right Button -->
+                                <button type="button" data-gb-btn="right" class="dpad-btn dpad-right" aria-label="Right">
+                                    <span>▶</span>
+                                </button>
+                                <!-- Down Button -->
+                                <button type="button" data-gb-btn="down" class="dpad-btn dpad-down" aria-label="Down">
+                                    <span>▼</span>
+                                </button>
+                            </div>
+                            <span class="text-[9px] font-bold text-slate-500 tracking-wider mt-1.5 uppercase font-mono">D-Pad</span>
+                        </div>
+
+                        <!-- ACTION BUTTONS (B & A) -->
+                        <div class="action-buttons-wrapper flex flex-col items-center">
+                            <div class="action-pod flex items-center justify-between gap-3 sm:gap-4">
+                                <!-- Button B -->
+                                <div class="flex flex-col items-center">
+                                    <button type="button" data-gb-btn="B" class="btn-action btn-b" aria-label="Button B">
+                                        B
+                                    </button>
+                                    <span class="text-[10px] font-black text-slate-400 italic tracking-wider mt-1 rotate-[25deg]">B</span>
+                                </div>
+                                <!-- Button A -->
+                                <div class="flex flex-col items-center">
+                                    <button type="button" data-gb-btn="A" class="btn-action btn-a" aria-label="Button A">
+                                        A
+                                    </button>
+                                    <span class="text-[10px] font-black text-slate-400 italic tracking-wider mt-1 rotate-[25deg]">A</span>
+                                </div>
+                            </div>
+                            <span class="text-[9px] font-bold text-slate-500 tracking-wider mt-1.5 uppercase font-mono">Action</span>
+                        </div>
+
+                    </div>
+
+                    <!-- Lower Row: SELECT & START -->
+                    <div class="flex justify-center items-center gap-8 sm:gap-12 mt-3 sm:mt-5">
+                        <div class="flex flex-col items-center">
+                            <div class="pill-pod">
+                                <button type="button" data-gb-btn="select" class="btn-pill" aria-label="Select"></button>
+                            </div>
+                            <span class="text-[9px] font-bold text-slate-400 tracking-widest mt-1 uppercase font-mono">SELECT</span>
+                        </div>
+                        <div class="flex flex-col items-center">
+                            <div class="pill-pod">
+                                <button type="button" data-gb-btn="start" class="btn-pill" aria-label="Start"></button>
+                            </div>
+                            <span class="text-[9px] font-bold text-slate-400 tracking-widest mt-1 uppercase font-mono">START</span>
+                        </div>
+                    </div>
+
+                </div>
+
             </div>
 
-            <div class="mt-4 grid grid-cols-4 gap-4 w-full text-center text-[10px] text-slate-500">
-                <div>ARROWS: D-PAD</div>
-                <div>X: A / Z: B</div>
-                <div>ENTER: START</div>
-                <div>TAB: SELECT</div>
+            <!-- Mobile Quick Drawer Navigation Tabs (Visible on screens < 1024px) -->
+            <div class="w-full flex lg:hidden gap-1.5 mt-3 p-1.5 bg-slate-900/90 rounded-2xl border border-slate-800 font-mono shadow-md">
+                <button type="button" class="mobile-tab-btn flex-1 py-2 text-[11px] font-bold rounded-xl text-white bg-blue-600 transition cursor-pointer" data-tab="game">
+                    🎮 Game
+                </button>
+                <button type="button" class="mobile-tab-btn flex-1 py-2 text-[11px] font-bold rounded-xl text-slate-400 hover:text-white transition cursor-pointer" data-tab="files">
+                    📁 Files
+                </button>
+                <button type="button" class="mobile-tab-btn flex-1 py-2 text-[11px] font-bold rounded-xl text-slate-400 hover:text-white transition cursor-pointer" data-tab="chat">
+                    💬 Chat & Sync
+                </button>
+                <button type="button" class="mobile-tab-btn flex-1 py-2 text-[11px] font-bold rounded-xl text-slate-400 hover:text-white transition cursor-pointer" data-tab="logs">
+                    📋 Logs
+                </button>
             </div>
         </div>
 
-        <!-- RIGHT -->
-        <div class="lg:col-span-3 flex flex-col gap-4">
+        <!-- RIGHT COLUMN: RAM SYNC STATUS & LINK CHAT -->
+        <div id="panel-chat-col" class="lg:col-span-3 lg:order-3 order-3 flex flex-col gap-4 w-full">
 
-            <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
-                <h3 class="text-xs font-bold text-slate-400 mb-2 uppercase tracking-tighter">
+            <div class="bg-slate-900/90 p-4 rounded-2xl border border-slate-800 shadow-lg">
+                <h3 class="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider font-mono">
                     RAM Sync Status
                 </h3>
 
-                <div class="flex justify-between items-center bg-slate-900 p-2 rounded mb-1">
-                    <span class="text-[10px]">P1_READY ($C5FD)</span>
+                <div class="flex justify-between items-center bg-slate-950 p-2 rounded-xl mb-1.5 border border-slate-800/80">
+                    <span class="text-[10px] text-slate-400 font-mono">P1_READY ($C5FD)</span>
                     <div class="flex items-center gap-2">
-                        <span id="p1-val" class="text-[10px] font-bold text-slate-300">0</span>
-                        <span id="p1-flag" class="w-3 h-3 rounded-full bg-slate-700"></span>
+                        <span id="p1-val" class="text-[10px] font-bold text-slate-300 font-mono">0</span>
+                        <span id="p1-flag" class="w-2.5 h-2.5 rounded-full bg-slate-700"></span>
                     </div>
                 </div>
 
-                <div class="flex justify-between items-center bg-slate-900 p-2 rounded mb-1">
-                    <span class="text-[10px]">P2_READY ($C5FE)</span>
+                <div class="flex justify-between items-center bg-slate-950 p-2 rounded-xl mb-1.5 border border-slate-800/80">
+                    <span class="text-[10px] text-slate-400 font-mono">P2_READY ($C5FE)</span>
                     <div class="flex items-center gap-2">
-                        <span id="p2-val" class="text-[10px] font-bold text-slate-300">0</span>
-                        <span id="p2-flag" class="w-3 h-3 rounded-full bg-slate-700"></span>
+                        <span id="p2-val" class="text-[10px] font-bold text-slate-300 font-mono">0</span>
+                        <span id="p2-flag" class="w-2.5 h-2.5 rounded-full bg-slate-700"></span>
                     </div>
                 </div>
 
-                <div class="flex justify-between items-center bg-slate-900 p-2 rounded mb-1">
-                    <span class="text-[10px]">FIFO QUEUE</span>
-                    <span id="fifo-depth" class="text-[10px] text-blue-400 font-bold">0 pkts</span>
+                <div class="flex justify-between items-center bg-slate-950 p-2 rounded-xl mb-1.5 border border-slate-800/80">
+                    <span class="text-[10px] text-slate-400 font-mono">FIFO QUEUE</span>
+                    <span id="fifo-depth" class="text-[10px] text-sky-400 font-bold font-mono">0 pkts</span>
                 </div>
 
-                <div class="flex justify-between items-center bg-slate-900 p-2 rounded">
-                    <span class="text-[10px]">OPPONENT</span>
-                    <span id="opp-name-tag" class="text-[10px] text-blue-400 font-bold truncate max-w-[120px]">
+                <div class="flex justify-between items-center bg-slate-950 p-2 rounded-xl border border-slate-800/80">
+                    <span class="text-[10px] text-slate-400 font-mono">OPPONENT</span>
+                    <span id="opp-name-tag" class="text-[10px] text-sky-400 font-bold truncate max-w-[120px] font-mono">
                         NONE
                     </span>
                 </div>
             </div>
 
-            <div class="bg-slate-800 p-4 rounded-lg border border-slate-700 flex-1 flex flex-col overflow-hidden max-h-[400px]">
-                <h3 class="text-xs font-bold text-slate-400 mb-3 uppercase tracking-tighter">
+            <div class="bg-slate-900/90 p-4 rounded-2xl border border-slate-800 shadow-lg flex-1 flex flex-col overflow-hidden max-h-[360px]">
+                <h3 class="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider font-mono">
                     Link Chat
                 </h3>
 
                 <div
                     id="chat-box"
-                    class="flex-1 overflow-y-auto text-[11px] mb-2 space-y-1 hide-scroll"
+                    class="flex-1 overflow-y-auto text-[11px] mb-2 space-y-1.5 hide-scroll pr-1 min-h-[140px]"
                 ></div>
 
                 <div class="flex gap-2">
@@ -269,12 +785,12 @@
                         type="text"
                         id="chat-input"
                         placeholder="Say something..."
-                        class="flex-1 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs focus:outline-none"
+                        class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-blue-500 font-sans"
                     >
                 </div>
             </div>
         </div>
-    </div>
+    </main>
 
     <script src="binjgb.js"></script>
 
@@ -569,27 +1085,364 @@
             audio = new GameAudio(module, emulatorPtr);
             $('btn-download-sav').disabled = false;
             $('btn-save-now').disabled = false;
+
+            // Light up Game Boy Power LED (green with soft glow)
+            const pLed = $('power-led');
+            if (pLed) {
+                pLed.className = 'w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981] border border-emerald-400 transition-all';
+            }
+
             tick();
         }
 
+        const joypadFns = {};
+        const pressedButtons = new Set();
+
+        function setButtonState(btn, isPressed) {
+            if (isPressed) pressedButtons.add(btn);
+            else pressedButtons.delete(btn);
+
+            if (emulatorPtr) {
+                if (!joypadFns[btn]) {
+                    const fnName = {
+                        up: 'set_joyp_up',
+                        down: 'set_joyp_down',
+                        left: 'set_joyp_left',
+                        right: 'set_joyp_right',
+                        A: 'set_joyp_A',
+                        B: 'set_joyp_B',
+                        start: 'set_joyp_start',
+                        select: 'set_joyp_select'
+                    }[btn];
+                    if (fnName) {
+                        const fn = getExport(fnName);
+                        if (fn) joypadFns[btn] = (val) => fn(emulatorPtr, val);
+                    }
+                }
+
+                if (joypadFns[btn]) {
+                    joypadFns[btn](isPressed);
+                }
+            }
+
+            // Visual feedback on all matching on-screen buttons
+            const els = document.querySelectorAll(`[data-gb-btn="${btn}"]`);
+            els.forEach(el => {
+                if (isPressed) el.classList.add('pressed');
+                else el.classList.remove('pressed');
+            });
+
+            // Haptic vibration on phones (if supported)
+            if (isPressed && navigator.vibrate) {
+                try { navigator.vibrate(10); } catch (_) {}
+            }
+        }
+
+        function resetAllButtons() {
+            const all = ['up', 'down', 'left', 'right', 'A', 'B', 'start', 'select'];
+            all.forEach(btn => setButtonState(btn, false));
+        }
+
+        let inputSetupDone = false;
+
         function setupInput() {
-            const binds = {
-                'ArrowDown': 'set_joyp_down',
-                'ArrowLeft': 'set_joyp_left',
-                'ArrowRight': 'set_joyp_right',
-                'ArrowUp': 'set_joyp_up',
-                'KeyZ': 'set_joyp_B',
-                'KeyX': 'set_joyp_A',
-                'Enter': 'set_joyp_start',
-                'Tab': 'set_joyp_select'
+            if (inputSetupDone) return;
+            inputSetupDone = true;
+
+            // ========================================================
+            // MULTI-TOUCH ENGINE: Tracks touches by identifier so
+            // left thumb on D-Pad and right thumb on A/B work simultaneously!
+            // ========================================================
+            const dpadCross = $('dpad-cross');
+            let dpadTouchId = null;
+            let currentDpadDirs = new Set();
+
+            const calculateDpadDirections = (clientX, clientY) => {
+                if (!dpadCross) return new Set();
+                const rect = dpadCross.getBoundingClientRect();
+                const cx = rect.left + rect.width / 2;
+                const cy = rect.top + rect.height / 2;
+                const dx = clientX - cx;
+                const dy = clientY - cy;
+                const dist = Math.hypot(dx, dy);
+
+                const dirs = new Set();
+                if (dist > 10) { // 10px deadzone
+                    const angle = Math.atan2(dy, dx) * 180 / Math.PI; // -180 to 180 deg
+                    // Up: -157.5 to -22.5
+                    if (angle < -22.5 && angle > -157.5) dirs.add('up');
+                    // Down: 22.5 to 157.5
+                    if (angle > 22.5 && angle < 157.5) dirs.add('down');
+                    // Right: -67.5 to 67.5
+                    if (angle > -67.5 && angle < 67.5) dirs.add('right');
+                    // Left: > 112.5 or < -112.5
+                    if (angle > 112.5 || angle < -112.5) dirs.add('left');
+                }
+                return dirs;
             };
 
-            Object.keys(binds).forEach(c => {
-                const fn = getExport(binds[c]);
-                if (fn) {
-                    keyFuncs[c] = (v) => fn(emulatorPtr, v);
+            const applyDpadDirections = (newDirs) => {
+                currentDpadDirs.forEach(d => {
+                    if (!newDirs.has(d)) setButtonState(d, false);
+                });
+                newDirs.forEach(d => {
+                    if (!currentDpadDirs.has(d)) setButtonState(d, true);
+                });
+                currentDpadDirs = newDirs;
+            };
+
+            // D-Pad Touch Listeners
+            if (dpadCross) {
+                dpadCross.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    if (audio?.ctx?.state === 'suspended') audio.ctx.resume();
+                    for (let i = 0; i < e.changedTouches.length; i++) {
+                        const touch = e.changedTouches[i];
+                        if (dpadTouchId === null) {
+                            dpadTouchId = touch.identifier;
+                            applyDpadDirections(calculateDpadDirections(touch.clientX, touch.clientY));
+                            break;
+                        }
+                    }
+                }, { passive: false });
+
+                window.addEventListener('touchmove', (e) => {
+                    if (dpadTouchId !== null) {
+                        for (let i = 0; i < e.changedTouches.length; i++) {
+                            const touch = e.changedTouches[i];
+                            if (touch.identifier === dpadTouchId) {
+                                e.preventDefault();
+                                applyDpadDirections(calculateDpadDirections(touch.clientX, touch.clientY));
+                                break;
+                            }
+                        }
+                    }
+                }, { passive: false });
+
+                const endDpadTouch = (e) => {
+                    if (dpadTouchId !== null) {
+                        for (let i = 0; i < e.changedTouches.length; i++) {
+                            if (e.changedTouches[i].identifier === dpadTouchId) {
+                                dpadTouchId = null;
+                                applyDpadDirections(new Set());
+                                break;
+                            }
+                        }
+                    }
+                };
+
+                window.addEventListener('touchend', endDpadTouch, { passive: false });
+                window.addEventListener('touchcancel', endDpadTouch, { passive: false });
+
+                // Desktop Pointer Drag Fallback for D-Pad
+                let pointerActive = false;
+                dpadCross.addEventListener('pointerdown', (e) => {
+                    if (e.pointerType === 'touch') return; // Handled by TouchEvent
+                    e.preventDefault();
+                    pointerActive = true;
+                    dpadCross.setPointerCapture(e.pointerId);
+                    applyDpadDirections(calculateDpadDirections(e.clientX, e.clientY));
+                    if (audio?.ctx?.state === 'suspended') audio.ctx.resume();
+                });
+
+                dpadCross.addEventListener('pointermove', (e) => {
+                    if (pointerActive && e.pointerType !== 'touch') {
+                        e.preventDefault();
+                        applyDpadDirections(calculateDpadDirections(e.clientX, e.clientY));
+                    }
+                });
+
+                const clearPointerDpad = (e) => {
+                    if (pointerActive) {
+                        pointerActive = false;
+                        applyDpadDirections(new Set());
+                    }
+                };
+
+                dpadCross.addEventListener('pointerup', clearPointerDpad);
+                dpadCross.addEventListener('pointercancel', clearPointerDpad);
+            }
+
+            // Action & Pill Buttons Touch Listeners (A, B, Select, Start)
+            // Each button tracks active touch identifiers so multiple buttons can be held at once!
+            const touchButtons = document.querySelectorAll('[data-gb-btn]:not(.dpad-btn)');
+            touchButtons.forEach(el => {
+                const btn = el.getAttribute('data-gb-btn');
+                const activeBtnTouchIds = new Set();
+
+                el.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (audio?.ctx?.state === 'suspended') audio.ctx.resume();
+                    for (let i = 0; i < e.changedTouches.length; i++) {
+                        activeBtnTouchIds.add(e.changedTouches[i].identifier);
+                    }
+                    setButtonState(btn, true);
+                }, { passive: false });
+
+                const handleEnd = (e) => {
+                    for (let i = 0; i < e.changedTouches.length; i++) {
+                        activeBtnTouchIds.delete(e.changedTouches[i].identifier);
+                    }
+                    if (activeBtnTouchIds.size === 0) {
+                        setButtonState(btn, false);
+                    }
+                };
+
+                el.addEventListener('touchend', handleEnd, { passive: false });
+                el.addEventListener('touchcancel', handleEnd, { passive: false });
+
+                // Desktop Mouse fallback
+                el.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    setButtonState(btn, true);
+                    if (audio?.ctx?.state === 'suspended') audio.ctx.resume();
+                });
+                el.addEventListener('mouseup', (e) => {
+                    e.preventDefault();
+                    setButtonState(btn, false);
+                });
+                el.addEventListener('mouseleave', (e) => {
+                    setButtonState(btn, false);
+                });
+            });
+
+            // ========================================================
+            // KEYBOARD CONTROLS (DESKTOP)
+            // ========================================================
+            const keyMap = {
+                'ArrowUp': 'up', 'KeyW': 'up',
+                'ArrowDown': 'down', 'KeyS': 'down',
+                'ArrowLeft': 'left', 'KeyA': 'left',
+                'ArrowRight': 'right', 'KeyD': 'right',
+                'KeyX': 'A', 'KeyJ': 'A', 'Space': 'A',
+                'KeyZ': 'B', 'KeyK': 'B', 'Backspace': 'B',
+                'Enter': 'start',
+                'Tab': 'select', 'ShiftLeft': 'select', 'ShiftRight': 'select'
+            };
+
+            window.addEventListener('keydown', (e) => {
+                if (e.code === 'F9') { e.preventDefault(); return; }
+                if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) return;
+                const btn = keyMap[e.code];
+                if (btn) {
+                    e.preventDefault();
+                    setButtonState(btn, true);
+                    if (audio?.ctx?.state === 'suspended') audio.ctx.resume();
                 }
             });
+
+            window.addEventListener('keyup', (e) => {
+                if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) return;
+                const btn = keyMap[e.code];
+                if (btn) {
+                    e.preventDefault();
+                    setButtonState(btn, false);
+                }
+            });
+
+            // Reset buttons when window loses focus (e.g. Alt-Tab, screenshot tool)
+            window.addEventListener('blur', resetAllButtons);
+            window.addEventListener('focus', resetAllButtons);
+
+            // ========================================================
+            // MOBILE NAVIGATION TABS (GAME, FILES, CHAT, LOGS)
+            // ========================================================
+            document.querySelectorAll('.mobile-tab-btn').forEach(btn => {
+                btn.onclick = () => {
+                    const tab = btn.getAttribute('data-tab');
+                    document.querySelectorAll('.mobile-tab-btn').forEach(b => {
+                        b.classList.remove('bg-blue-600', 'text-white');
+                        b.classList.add('text-slate-400');
+                    });
+                    btn.classList.add('bg-blue-600', 'text-white');
+                    btn.classList.remove('text-slate-400');
+
+                    const filesCol = $('panel-files-col');
+                    const chatCol = $('panel-chat-col');
+                    const chassis = $('gb-chassis');
+
+                    if (window.innerWidth < 1024) {
+                        if (tab === 'game') {
+                            if (filesCol) filesCol.style.display = 'none';
+                            if (chatCol) chatCol.style.display = 'none';
+                            chassis?.scrollIntoView({ behavior: 'smooth' });
+                        } else if (tab === 'files') {
+                            if (filesCol) filesCol.style.display = 'flex';
+                            if (chatCol) chatCol.style.display = 'none';
+                            filesCol?.scrollIntoView({ behavior: 'smooth' });
+                        } else if (tab === 'chat') {
+                            if (filesCol) filesCol.style.display = 'none';
+                            if (chatCol) chatCol.style.display = 'flex';
+                            chatCol?.scrollIntoView({ behavior: 'smooth' });
+                        } else if (tab === 'logs') {
+                            if (filesCol) filesCol.style.display = 'flex';
+                            if (chatCol) chatCol.style.display = 'none';
+                            $('system-logs')?.scrollIntoView({ behavior: 'smooth' });
+                        }
+                    }
+                };
+            });
+
+            // Responsive Window Resize Handler
+            window.addEventListener('resize', () => {
+                const filesCol = $('panel-files-col');
+                const chatCol = $('panel-chat-col');
+                if (window.innerWidth >= 1024) {
+                    if (filesCol) filesCol.style.display = '';
+                    if (chatCol) chatCol.style.display = '';
+                } else {
+                    const activeTab = document.querySelector('.mobile-tab-btn.bg-blue-600')?.getAttribute('data-tab') || 'game';
+                    if (activeTab === 'game') {
+                        if (filesCol) filesCol.style.display = 'none';
+                        if (chatCol) chatCol.style.display = 'none';
+                    } else if (activeTab === 'files' || activeTab === 'logs') {
+                        if (filesCol) filesCol.style.display = 'flex';
+                        if (chatCol) chatCol.style.display = 'none';
+                    } else if (activeTab === 'chat') {
+                        if (filesCol) filesCol.style.display = 'none';
+                        if (chatCol) chatCol.style.display = 'flex';
+                    }
+                }
+            });
+
+            // Initial mobile layout setup: hide side panels on phone so gamepad is primary
+            if (window.innerWidth < 1024) {
+                const filesCol = $('panel-files-col');
+                const chatCol = $('panel-chat-col');
+                if (filesCol) filesCol.style.display = 'none';
+                if (chatCol) chatCol.style.display = 'none';
+            }
+
+            // Room code copy button
+            const btnCopy = $('btn-copy-code');
+            if (btnCopy) {
+                btnCopy.onclick = async () => {
+                    const code = $('room-code')?.innerText.trim();
+                    if (code && code !== '------') {
+                        try {
+                            await navigator.clipboard.writeText(code);
+                            const orig = $('room-code').innerText;
+                            $('room-code').innerText = 'COPIED!';
+                            setTimeout(() => { $('room-code').innerText = orig; }, 1500);
+                        } catch (_) {}
+                    }
+                };
+            }
+
+            // Audio Toggle / Resume button
+            const btnAudio = $('btn-audio-toggle');
+            if (btnAudio) {
+                btnAudio.onclick = () => {
+                    if (!audio?.ctx) return;
+                    if (audio.ctx.state === 'suspended') {
+                        audio.ctx.resume();
+                        $('audio-icon').innerText = '🔊';
+                    } else if (audio.ctx.state === 'running') {
+                        $('audio-icon').innerText = '🔊';
+                    }
+                };
+            }
         }
 
         // ============================================================
@@ -1392,31 +2245,11 @@
             $('gb-canvas').focus();
         };
 
-        // When window regains focus (e.g. after screenshot tool or Alt-Tab), reset any stuck keys
-        window.addEventListener('focus', () => {
-            Object.keys(keyFuncs).forEach(code => {
-                if (keyFuncs[code]) keyFuncs[code](false);
-            });
+        // Ensure input listeners are active immediately
+        window.addEventListener('DOMContentLoaded', () => {
+            setupInput();
         });
-
-        window.addEventListener('keydown', e => {
-            // Prevent accidental reader mode (F9 on Edge/Chrome)
-            if (e.code === 'F9') {
-                e.preventDefault();
-                return;
-            }
-            if (keyFuncs[e.code] && document.activeElement.tagName !== 'INPUT') {
-                e.preventDefault();
-                keyFuncs[e.code](true);
-            }
-        });
-
-        window.addEventListener('keyup', e => {
-            if (keyFuncs[e.code] && document.activeElement.tagName !== 'INPUT') {
-                e.preventDefault();
-                keyFuncs[e.code](false);
-            }
-        });
+        setupInput();
     </script>
 </body>
 </html>
