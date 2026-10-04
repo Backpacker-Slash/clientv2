@@ -427,10 +427,21 @@
         <div class="flex items-center gap-2.5 sm:gap-3">
             <div class="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_12px_#10b981] animate-pulse"></div>
             <div>
-                <h1 class="text-sm sm:text-lg font-bold tracking-tight text-white flex items-center gap-1.5 sm:gap-2">
-                    POKÉMON TCG
-                    <span class="text-[9px] sm:text-xs font-semibold px-2 py-0.5 rounded bg-blue-950 text-blue-400 border border-blue-800/60 font-mono">LINK DUEL</span>
-                </h1>
+                <div class="flex items-center gap-2">
+                    <h1 class="text-sm sm:text-lg font-bold tracking-tight text-white flex items-center gap-1.5 sm:gap-2">
+                        POKÉMON TCG
+                        <span class="text-[9px] sm:text-xs font-semibold px-2 py-0.5 rounded bg-blue-950 text-blue-400 border border-blue-800/60 font-mono">LINK DUEL</span>
+                    </h1>
+                    <!-- Reset button next to the banner (hidden when game is not running) -->
+                    <button
+                        id="btn-reset-game"
+                        type="button"
+                        class="hidden bg-rose-950/80 hover:bg-rose-900 active:scale-95 text-rose-300 hover:text-white px-2.5 py-0.5 rounded-lg text-[10px] font-bold font-mono border border-rose-700/60 shadow-sm cursor-pointer transition flex items-center gap-1"
+                        title="Reset Game"
+                    >
+                        <span>🔄</span> RESET
+                    </button>
+                </div>
                 <div class="text-[10px] sm:text-[11px] text-slate-400 flex items-center gap-1.5 font-mono">
                     <span>STATUS:</span>
                     <span id="conn-status" class="text-amber-400 font-bold uppercase tracking-wider">Disconnected</span>
@@ -438,44 +449,32 @@
             </div>
         </div>
 
-        <!-- RIGHT CONTROLS: START GAME IN TOP-RIGHT, ROOM & JOIN BELOW -->
-        <div class="flex flex-col items-end gap-2">
-            <!-- TOP ROW: START GAME & AUDIO -->
-            <div class="flex items-center gap-2">
-                <button
-                    id="btn-start"
-                    class="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white px-4 py-1.5 rounded-xl text-xs font-bold transition-all shadow-[0_0_15px_rgba(16,185,129,0.35)] cursor-pointer tracking-wider uppercase font-mono flex items-center gap-1.5 border border-emerald-400/30"
-                >
-                    <span class="text-[10px]">▶</span> START GAME
-                </button>
-
-                <button id="btn-audio-toggle" type="button" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-xl text-xs font-mono cursor-pointer transition flex items-center gap-1" title="Toggle / Resume Audio">
-                    <span id="audio-icon">🔊</span>
-                </button>
-            </div>
-
-            <!-- BOTTOM ROW: ROOM CODE, HOST, CODE INPUT, JOIN -->
-            <div class="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
-                <!-- Room Code with Click-to-Copy -->
-                <button id="btn-copy-code" type="button" title="Click to copy room code" class="bg-slate-950 px-2.5 py-1 rounded-xl border border-slate-800 text-right cursor-pointer hover:border-sky-500 transition group">
-                    <div class="text-[8px] sm:text-[9px] text-slate-500 group-hover:text-sky-400 uppercase font-semibold tracking-wider font-mono flex items-center gap-1 justify-end">
-                        <span>Room</span>
-                        <span class="text-[8px]">📋</span>
-                    </div>
-                    <div id="room-code" class="text-xs sm:text-sm font-bold text-sky-400 tracking-widest font-mono">------</div>
-                </button>
-
-                <button id="btn-host" class="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-md cursor-pointer">
-                    HOST
-                </button>
-
-                <div class="flex items-center gap-1">
-                    <input type="text" id="remote-id" placeholder="CODE" maxlength="6" class="bg-slate-950 border border-slate-700 px-2 py-1.5 rounded-xl text-xs font-mono uppercase tracking-widest focus:outline-none focus:border-blue-500 w-16 sm:w-24 text-center text-white placeholder-slate-600">
-                    <button id="btn-connect" class="bg-blue-600 hover:bg-blue-500 active:scale-95 text-white px-2.5 sm:px-3.5 py-1.5 rounded-xl text-xs font-bold transition shadow-md cursor-pointer">
-                        JOIN
-                    </button>
+        <!-- RIGHT CONTROLS: ROOM, HOST, JOIN, AUDIO -->
+        <div class="flex flex-wrap items-center gap-2 sm:gap-2.5">
+            <!-- Room Code with Click-to-Copy -->
+            <button id="btn-copy-code" type="button" title="Click to copy room code" class="bg-slate-950 px-2.5 py-1 rounded-xl border border-slate-800 text-right cursor-pointer hover:border-sky-500 transition group">
+                <div class="text-[8px] sm:text-[9px] text-slate-500 group-hover:text-sky-400 uppercase font-semibold tracking-wider font-mono flex items-center gap-1 justify-end">
+                    <span>Room</span>
+                    <span class="text-[8px]">📋</span>
                 </div>
+                <div id="room-code" class="text-xs sm:text-sm font-bold text-sky-400 tracking-widest font-mono">------</div>
+            </button>
+
+            <button id="btn-host" class="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-md cursor-pointer">
+                HOST
+            </button>
+
+            <div class="flex items-center gap-1">
+                <input type="text" id="remote-id" placeholder="CODE" maxlength="6" class="bg-slate-950 border border-slate-700 px-2 py-1.5 rounded-xl text-xs font-mono uppercase tracking-widest focus:outline-none focus:border-blue-500 w-16 sm:w-24 text-center text-white placeholder-slate-600">
+                <button id="btn-connect" class="bg-blue-600 hover:bg-blue-500 active:scale-95 text-white px-2.5 sm:px-3.5 py-1.5 rounded-xl text-xs font-bold transition shadow-md cursor-pointer">
+                    JOIN
+                </button>
             </div>
+
+            <!-- Audio Resume / Sound Button -->
+            <button id="btn-audio-toggle" type="button" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-xl text-xs font-mono cursor-pointer transition flex items-center gap-1" title="Toggle / Resume Audio">
+                <span id="audio-icon">🔊</span>
+            </button>
         </div>
     </header>
 
@@ -616,6 +615,21 @@
                     <!-- Screen Canvas Container -->
                     <div class="relative w-full aspect-[160/144] max-w-[420px] bg-black rounded-lg overflow-hidden border border-zinc-800 shadow-2xl flex items-center justify-center">
                         <canvas id="gb-canvas" width="160" height="144" tabindex="0" class="cursor-pointer"></canvas>
+
+                        <!-- Screen Start Overlay (in the middle of the Game Boy screen) -->
+                        <div id="screen-start-overlay" class="absolute inset-0 bg-slate-950/85 backdrop-blur-[2px] flex flex-col items-center justify-center p-4 transition-all z-20">
+                            <button
+                                id="btn-start"
+                                type="button"
+                                class="group relative bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white px-6 py-3 rounded-2xl text-xs sm:text-sm font-extrabold transition-all shadow-[0_0_25px_rgba(16,185,129,0.5)] cursor-pointer tracking-wider uppercase font-mono flex items-center gap-2 border-2 border-emerald-400/50 hover:border-emerald-300"
+                            >
+                                <span class="text-sm text-white group-hover:scale-110 transition-transform">▶</span>
+                                <span>START GAME</span>
+                            </button>
+                            <p id="screen-start-subtext" class="text-[10px] text-slate-400 mt-2.5 font-mono text-center max-w-[240px]">
+                                Ready to start duel
+                            </p>
+                        </div>
 
                         <!-- Audio Resume Overlay -->
                         <div id="focus-overlay" class="absolute inset-0 bg-black/80 flex flex-col items-center justify-center cursor-pointer transition-opacity z-20 hidden p-4 text-center">
@@ -872,6 +886,8 @@
         let connection = null;
         let myRoomCode = null;
         let remotePlayerName = "OPPONENT";
+        let currentRomBuffer = null;
+        let currentSavBuffer = null;
 
         // FIFO Queue for serial packets
         const incomingSerialQueue = [];
@@ -1087,6 +1103,11 @@
                 jSet(emulatorPtr, joypadPtr);
                 setupInput();
             }
+
+            currentRomBuffer = romBuffer;
+            currentSavBuffer = savBuffer;
+            $('screen-start-overlay')?.classList.add('hidden');
+            $('btn-reset-game')?.classList.remove('hidden');
 
             audio = new GameAudio(module, emulatorPtr);
             $('btn-download-sav').disabled = false;
@@ -1814,8 +1835,8 @@
                             const sizeKb = Math.round(buf.byteLength / 1024);
                             const cleanName = path.includes('/') ? path.split('/').pop() : path;
                             $('rom-status').innerHTML = `<span class="text-emerald-400 font-bold">Auto: ${cleanName} (${sizeKb}KB)</span>`;
-                            $('btn-start').innerHTML = `<span>▶</span> START GAME`;
-                            $('btn-start').className = "bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white px-4 py-1.5 rounded-xl text-xs font-bold transition-all shadow-[0_0_15px_rgba(16,185,129,0.35)] cursor-pointer tracking-wider uppercase font-mono flex items-center gap-1.5 border border-emerald-400/30";
+                            const sub = $('screen-start-subtext');
+                            if (sub) sub.innerText = `ROM Ready: ${cleanName} (${sizeKb}KB)`;
                             log(`Auto-detected ROM: ${cleanName} (${sizeKb} KB)`);
                             return;
                         }
@@ -1879,9 +1900,24 @@
             }
 
             await initEmulator(romBuf, savBuf);
-            $('btn-start').innerHTML = `<span>🔄</span> RESTART`;
             $('focus-overlay').classList.remove('hidden');
         };
+
+        const btnResetGame = $('btn-reset-game');
+        if (btnResetGame) {
+            btnResetGame.onclick = async () => {
+                if (!emulatorPtr || !currentRomBuffer) return;
+                log("Resetting console...");
+                const sram = getEmulatorSramData();
+                if (sram && sram.length > 0) {
+                    await saveSramToStorage(sram);
+                }
+                const storedSram = await loadSramFromStorage();
+                const savBuf = storedSram ? storedSram.buffer : currentSavBuffer;
+                await initEmulator(currentRomBuffer, savBuf);
+                log("Game reset successfully.");
+            };
+        }
 
         $('btn-save-now').onclick = async () => {
             if (!emulatorPtr) return;
